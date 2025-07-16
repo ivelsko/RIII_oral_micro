@@ -1,0 +1,183 @@
+---
+title: "RIII project Figure 1"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(janitor)
+library(data.table)
+library(tidyverse)
+library(ggstar)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath("../../.."))
+```
+
+
+## Extract concentrations
+```{r}
+extracts <- fread("00-documentation/calc_extract_ng_per_mg.tsv") %>%
+  mutate(Type = "Calculus") %>%
+  filter(Site != "Modern",
+         Published != "No_info")
+
+```
+
+```{r}
+
+# now bin the concentration like for GC content
+breaks_extract = c(0.1,1,1.33,1.66,1.99,2.32,2.65,2.98,3.31,3.64,3.97,4,
+                   5.2,6.4,7.6,8.8,10,11.2,12.4,13.6,14.8,16,
+                   20.8,25.6,30.4,35.2,40,44.8,49.6,54.4,59.2,64,
+                   83.2,102,121,140,160,179,198,217,236,256,
+                   281,306,332,357,383,408,433,459,484,510)
+
+extracts_binned <- extracts %>%
+  mutate(conc = cut(calc, breaks = breaks_extract, include.lowest = TRUE)) %>%
+  group_by(Type, conc) %>%
+  summarise(counts = n()) %>%
+  complete(conc) %>%
+  ungroup() %>%
+  mutate(counts = ifelse(is.na(counts), 0, counts))
+
+extracts %>%
+  summarize(median_conc = median(calc))
+
+```
+
+
+
+```{r}
+
+conc_plot <- extracts_binned %>%
+   mutate(conc = factor(conc, level=c("[0.1,1]","(1,1.33]","(1.33,1.66]","(1.66,1.99]","(1.99,2.32]","(2.32,2.65]","(2.65,2.98]","(2.98,3.31]","(3.31,3.64]","(3.64,3.97]","(3.97,4]","(4,5.2]","(5.2,6.4]","(6.4,7.6]","(7.6,8.8]","(8.8,10]","(10,11.2]","(11.2,12.4]","(12.4,13.6]","(13.6,14.8]","(14.8,16]","(16,20.8]","(20.8,25.6]","(25.6,30.4]","(30.4,35.2]","(35.2,40]","(40,44.8]","(44.8,49.6]","(49.6,54.4]","(54.4,59.2]","(59.2,64]","(64,83.2]","(83.2,102]","(102,121]","(121,140]","(140,160]","(160,179]","(179,198]","(198,217]","(217,236]","(236,256]","(256,281]","(281,306]","(306,332]","(332,357]","(357,383]","(383,408]","(408,433]","(433,459]","(459,484]","(484,510]"))) %>%
+  ggplot(., aes(x = counts, y = conc)) +
+         geom_bar(aes(fill = Type), stat = "identity") +
+         theme_minimal(base_size = 12) +
+         theme(axis.text.x = element_text(angle = 0, hjust = 1, vjust = 0.5, size = 14)) +
+         theme(axis.text.y = element_text(size = 12)) +
+         scale_fill_manual(values = c("#05A8AA")) +
+         scale_x_continuous(breaks=scales::pretty_breaks(n=10)) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         theme(legend.position="none") +
+         ylab("[DNA] (ng/mg)") +
+         xlab("No. samples")
+conc_plot
+
+# ggsave("./06-publication/main_figures/Figure_1/extract_concentration_plot.pdf", plot = conc_plot, device = "pdf",
+#        scale = 1, width = 5, height = 10, units = c("in"), dpi = 300)
+
+```
+
+
+## Number of reads
+```{r}
+# read in the species table
+anc_calc_raw <- fread("./05-results/riii_kraken2_table_all_data.tsv") 
+
+poor_samples <- fread("./05-results/cuperdec_kraken2_poor_samples.tsv") %>% pull()
+
+# filter to have only species and remove all species with <1000 reads assigned
+anc_calc_sp <- anc_calc_raw %>% 
+  select(-poor_samples) %>%
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  arrange(species)
+
+# list the samples included in this study
+included <- anc_calc_sp %>%
+  slice_head(n = 1) %>%
+  pivot_longer(!species, names_to = "Eager_label", values_to = "Counts") %>%
+  select(Eager_label) %>%
+  mutate(Eager_label = str_replace_all(Eager_label, "calc","")) %>%
+  unique() %>%
+  arrange()
+
+```
+
+```{r}
+# read in metadata tables
+ne_metadata <- fread("./00-documentation/northern_europe_sample_metadata.tsv")
+
+# read in the gc/rl file for the RIII blanks
+r3b_gcrl <- fread("./00-documentation/riii_blanks_read_stats.tsv")
+
+
+gc_rl_table <- ne_metadata %>%
+  right_join(., included, by = "Eager_label") %>%
+  select(Eager_label, avg_gc, avg_rl, No_reads_no_human) %>%
+  bind_rows(., r3b_gcrl) %>%
+  # now add back metadata
+  left_join(., ne_metadata %>%
+               select(Eager_label, Study, Age_BP, Country), by = "Eager_label") %>%
+  select(Eager_label, Study, Age_BP, Country, avg_gc, avg_rl, No_reads_no_human) %>%
+  distinct() %>%
+  mutate(Study = ifelse(is.na(Study),"RIII blanks", Study),
+         Country = ifelse(str_detect(Eager_label, "R3"),"England", Country),
+         Country = ifelse(str_detect(Study, "Farrer2021|Weyrich2017|Fagernaes2020"), "England", Country),
+         Age_BP = ifelse(is.na(Age_BP),10,Age_BP))
+
+```
+
+
+```{r}
+# plot the total number of reads in each library
+
+Country_colors <- c("RIII" = "#471ca8",
+                    "Germany" = "#ffd681", 
+                    "England" = "#7fbbda",
+                    "Ireland" = "#82d3d4",
+                    "The Netherlands" = "#e36f9c")
+
+
+read_counts_plot <- gc_rl_table %>%
+  filter(!str_detect(Study, "RIII blanks")) %>%
+  mutate(No_reads_no_human = No_reads_no_human / 1000000,
+         RIII = ifelse(str_detect(Eager_label, "R31|R32|R33"),"Yes","No"),
+         Country = ifelse(str_detect(Study, "blanks"),"RIII blanks",
+                          ifelse(Study == "RIII" & str_detect(Eager_label, "R3"), "RIII", Country))) %>%
+  mutate(Country = fct_relevel(Country, "RIII","England","Ireland","The Netherlands","Germany","RIII blanks")) %>%
+  ggplot(., aes(x = Country, y = No_reads_no_human)) +
+    geom_star(aes(starshape = RIII, fill = Country), size = 2,starstroke=0.1, position = position_jitter()) +
+    scale_fill_manual(values = Country_colors) +
+    scale_starshape_manual(values = c(15, 1)) +
+    theme_minimal(base_size = 14) +
+     # scale_y_continuous(trans = 'log10', labels = scales::comma) +
+    scale_y_continuous(trans = 'log10', labels = scales::format_format(big.mark = " ", decimal.mark = ".", scientific = FALSE)) +
+    geom_hline(yintercept = 10, linetype = "dotted") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          text = element_text(size=16)) +
+    ylab("No. reads x 10^6") +
+    xlab("Study")
+
+read_counts_plot
+
+# ggsave("./06-publication/main_figures/Figure_1/riii_read_counts_plot_country.pdf", plot = read_counts_plot, device = "pdf",
+#        scale = 1, width = 6, height = 5, units = c("in"), dpi = 300)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
