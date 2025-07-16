@@ -1,0 +1,237 @@
+---
+title: "RIII sample read length, %GC, and sequence counts"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output:
+    github_document:
+        fig_width: 8
+        fig_height: 6
+        toc: true
+---
+
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(data.table)
+library(janitor)
+library(tidyverse)
+library(patchwork)
+opts_chunk$set(echo=F, warning=F, message=F, dpi=150)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+
+```{r, eval = F}
+
+# Ancient calculus MAGs
+anc_calc_list <- list.files(path = "./01-data/tf_mags_refs_gff", pattern = ".tsv", recursive = F, full.names = T)
+
+anc_calc_Tf_reads <- map_dfr(anc_calc_list, function(fn) {
+  fread(fn, sep = "\t", fill = T) %>%
+  mutate(Gene = (fn))
+}) %>%
+  rename(Genome_contig = 1,
+         Tool = 2,
+         Type = 3,
+         Start = 4,
+         End = 5,
+         something = 6,
+         Strand = 7,
+         unk = 8,
+         Hit = 9) %>%
+  mutate(Gene = str_remove_all(Gene, "./01-data/tf_mags_refs_gff/"),
+         Gene = str_remove_all(Gene, "_list.tsv")) %>%
+  separate_wider_delim(Genome_contig, delim = ":", names = c("Genome", "Contig"))
+
+anc_calc_Tf_reads
+
+# NCBI genomes
+ncbi_list <- list.files(path = "./04-analysis/bakta", pattern = ".tsv$", recursive = F, full.names = T)
+
+ncbi_Tf_genes <- map_dfr(ncbi_list, function(fn) {
+  fread(fn, sep = "\t", fill = T) %>%
+  mutate(Gene = (fn))
+}) %>%
+  rename(Genome_contig = 1,
+         Type = 2,
+         Start = 3,
+         End = 4,
+         Strand = 5,
+         Locus_tag = 6,
+         gene_name = 7,
+         Description = 8,
+         Result = 9) %>%
+  mutate(Gene = str_remove_all(Gene, "./04-analysis/bakta/"),
+         Gene = str_remove_all(Gene, "_list.tsv")) %>%
+  separate_wider_delim(Genome_contig, delim = ":", names = c("Genome", "Contig"))
+
+ncbi_Tf_genes
+
+
+```
+
+```{r, eval = F}
+
+vf_table <- anc_calc_Tf_reads %>%
+  select(Genome, Gene) %>%
+  bind_rows(., ncbi_Tf_genes %>%
+              select(Genome, Gene)) %>%
+  group_by(Gene, Genome) %>%
+  count() %>%
+  ungroup() %>%
+  arrange(Gene) %>%
+  mutate(Genome = str_remove_all(Genome, ".gff3.gz"),
+         Genome = str_remove_all(Genome, ".tsv.gz"))
+
+# vf_table %>%
+#   pivot_wider(names_from = "Gene", values_from = "n", values_fill = 0) %>%
+#   fwrite(., "./05-results/Tf_virulence_factor_presence.tsv", quote = F, sep = "\t")
+
+vf_table
+
+vf_table %>%
+  pivot_wider(names_from = "Gene", values_from = "n", values_fill = 0) %>%
+  pivot_longer(!Genome, names_to = "Gene", values_to = "n")
+
+```
+
+
+
+```{r vf_plot}
+# read in the table with virulence factor counts
+vf_table <- fread("./05-results/Tf_virulence_factor_presence.tsv")
+
+# read in tree branch order
+branch_order <- fread("./05-results/Tf_tip_order.tsv") %>%
+  pull(tip_order)
+
+pa_plot <- vf_table %>%
+  pivot_longer(!Genome, names_to = "Gene", values_to = "n") %>%
+  # convert gene counts per genome to present/absent
+  mutate(n = ifelse(n > 0, 1, 0), 
+         n = as.character(n)) %>%
+  # muddle with the annotation to remove the Assembly accession and anything else after it
+  mutate(Genome = str_replace_all(Genome, "GCA_","GCA:"),
+         Genome = str_replace_all(Genome, "GCF_","GCF:")) %>%
+  separate_wider_delim(Genome, delim = "_", names = "Genome", too_many = "drop") %>%
+  mutate(Genome = str_replace_all(Genome, ":","_")) %>%
+  # now need to get the genomes in the tree order
+  mutate(Genome = fct_relevel(Genome, branch_order)) %>%
+  arrange(Genome) %>%
+  # pivot_wider(names_from = "Genome", values_from = "Presence") %>%
+  ggplot(., aes(Gene, Genome, fill = n)) +
+    geom_tile() +
+    scale_fill_manual(values = c("#e7e9f0","#172869")) +
+    theme_minimal(base_size = 10) +
+    scale_y_discrete(limits=rev) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          plot.margin = margin(0, 0, 0, 0, "pt"),
+          axis.title.y = element_blank(),
+          legend.position = "left") +
+    theme(strip.text.x.top = element_text(angle = 90, hjust = -0.05, size = 8))
+pa_plot
+
+```
+
+```{r cc_table}
+
+mag_cc <- fread("./00-documentation/tf_ancient_mags.tsv") %>%
+  select(BinID, checkM.completeness, checkM.contamination) %>%
+  mutate(folder = BinID) %>%
+  separate(BinID, into = c("Genome","binID"), sep = "-", extra = "merge") %>%
+  mutate(Genome = str_replace_all(folder, "-megahit_00",".bin.r."),
+         Genome = str_replace_all(Genome, "-megahit_0",".bin.r.")) %>%
+  select(Genome, checkM.completeness, checkM.contamination) %>%
+  rename(completeness = 2,
+         contamination = 3)
+
+# read in the dRep completeness/contamination table for the NCBI T. forsythia genomes
+tf_cc <- fread("./04-analysis/dRep/dRep_40_Tf_refs_out/data_tables/genomeInfo.csv") %>%
+  select(genome,completeness,contamination) %>%
+  mutate(genome = str_replace_all(genome, ".fa","")) %>%
+  rename(Genome = genome)
+
+
+cc_table <- tf_cc %>%
+  bind_rows(., mag_cc)
+
+```
+
+```{r}
+
+col_fun = circlize::colorRamp2(c(0, 100), c("#000000", "#ffffff")) # 75, 130
+
+# completeness
+completeness_plot <- cc_table %>%
+  mutate(topic = "RIII_tree") %>%
+  mutate(Genome = fct_relevel(Genome, branch_order)) %>%
+  arrange(Genome) %>%
+  ggplot(., aes(topic, Genome, fill = completeness)) +
+    geom_tile() +
+    scale_fill_gradient(low = "#ffffff", high = "#000000") +
+    theme_minimal(base_size = 10) +
+    scale_y_discrete(limits=rev) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 1, vjust = 0.5),
+          plot.margin = margin(0, 0, 0, 0, "pt"),
+          axis.title.y = element_blank(),
+          legend.position = "left") +
+    theme(axis.text.y = element_blank()) +
+    theme(strip.text.x.top = element_text(angle = 90, hjust = -0.05, size = 8))
+completeness_plot
+
+# contamination
+contamination_plot <-  cc_table %>%
+  mutate(topic = "RIII_tree") %>%
+  mutate(Genome = fct_relevel(Genome, branch_order)) %>%
+  arrange(Genome) %>%
+  ggplot(., aes(topic, Genome, fill = contamination)) +
+    geom_tile() +
+    scale_fill_gradient(low = "#ffffff", high = "#000000") +
+    theme_minimal(base_size = 10) +
+    scale_y_discrete(limits=rev) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 1, vjust = 0.5),
+          plot.margin = margin(0, 0, 0, 0, "pt"),
+          axis.title.y = element_blank(),
+          legend.position = "left") +
+    theme(axis.text.y = element_blank()) +
+    theme(strip.text.x.top = element_text(angle = 90, hjust = -0.05, size = 8))
+contamination_plot
+
+```
+
+```{r assemble_plots}
+
+info_plot <- pa_plot + completeness_plot + contamination_plot +
+  plot_layout(widths = c(7.5,1,1))
+info_plot
+
+# ggsave("./06-publication/prelim_figs/Tf_virulence_factor_plot.pdf", plot = info_plot, device = "pdf",
+#        scale = 1, width = 7, height = 5, units = c("in"), dpi = 300)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

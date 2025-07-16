@@ -1,0 +1,577 @@
+---
+title: "RIII sample read length, %GC, and sequence counts"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output:
+    github_document:
+        fig_width: 8
+        fig_height: 6
+        toc: true
+---
+
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(data.table)
+library(janitor)
+library(tidyverse)
+opts_chunk$set(echo=F, warning=F, message=F, dpi=150)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+
+checkm_manual <- fread("./04-analysis/manual_bins/stats/checkM/CMC001.B-manual_bin.1.fa.checkM.txt")
+
+checkm_manual %>%
+  arrange(desc(`Genome size (bp)`))
+
+
+checkm_manual %>%
+  filter(Completeness >= 50,
+         Contamination <= 10) %>%
+  arrange(desc(Completeness)) %>%
+  select(-`Translation table`, -`N50 (scaffolds)`, -`Longest scaffold (bp)`, -`# scaffolds`, -`# genomes`, -`Mean scaffold length (bp)`, -`GC std (scaffolds > 1kbp)`, -`0`, -`1`, -`2`, -`3`, -`4`, -`5+`) %>%
+  arrange(`Bin Id`)
+
+```
+
+
+
+
+```{r}
+mag_contigs_names_per_bin <- fread("./00-documentation/cmc_contig_names_per_bin.tsv") %>%
+  bind_rows(., fread("./00-documentation/contig_names_per_bin.tsv"))
+
+```
+
+
+```{r}
+
+# check coverage for the contigs in each manual bin
+
+cmc <- fread("./04-analysis/manual_bins/bin_lists/CMC025.B.abot439.m8_manual_bin_contigs_list.tsv", header = F) %>%
+  rename(contig = 1) %>%
+  mutate(splitit = contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) 
+
+contig_order <- cmc %>%
+  arrange(desc(cov)) %>%
+  pull(contig)
+
+cmc %>%
+  mutate(contig = fct_relevel(contig, contig_order)) %>%
+  arrange(contig) %>%
+  ggplot(., aes(x = contig, y = cov)) +
+         geom_bar(stat = "identity") + #  
+         scale_fill_manual(values = c("#cc8475","#FFA693","#FAF3DD","#B8F2E6","#AED9E0","#5E6472","#383c44")) +
+         theme_minimal() +
+         theme(axis.text.x = element_blank()) +
+         ylim(0,100) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         ylab("coverage") +
+         xlab("contig no.")
+
+cmc %>%
+  # remove the super high one
+  filter(cov < 1000) %>%
+  summarize(avg_cov = mean(cov),
+            sd_cov = sd(cov)) %>%
+  ungroup()
+  
+
+```
+
+```{r}
+# let's check a couple that are really too big genome-length-wise
+#  ERS3774469, SRS3078139, CMC023.A, ERS6256719, SRS6212651
+
+bigfile <- fread("./04-analysis/manual_bins/bin_lists/ERS3774469.abot439.m8_manual_bin_contigs_list.tsv", header = F) %>%
+  rename(contig = 1) %>%
+  mutate(splitit = contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) 
+
+contig_order <- bigfile %>%
+  arrange(desc(cov)) %>%
+  pull(contig)
+
+bigfile %>%
+  # filter(cov <= 1000) %>%
+  mutate(contig = fct_relevel(contig, contig_order)) %>%
+  arrange(contig) %>%
+  ggplot(., aes(x = contig, y = cov)) +
+         geom_bar(stat = "identity") + #  
+         scale_fill_manual(values = c("#cc8475","#FFA693","#FAF3DD","#B8F2E6","#AED9E0","#5E6472","#383c44")) +
+         theme_minimal() +
+         theme(axis.text.x = element_blank()) +
+         ylim(0,100) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         ylab("coverage") +
+         xlab("contig no.")
+
+bigfile %>%
+  # remove the super high one
+  filter(cov < 1000) %>%
+  summarize(avg_cov = mean(cov),
+            sd_cov = sd(cov)) %>%
+  ungroup()
+  
+
+
+```
+
+
+```{r}
+
+# How Alex used the coverage to clean up bins
+# "Finally, we determined the average coverage along each contig and 
+# discarded all contigs whose coverage depth differed from the mean 
+# depth of all MAG contigs by more than two standard deviations."
+
+mag_contigs_names_per_bin %>%
+  mutate(splitit = Contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  group_by(Bin) %>%
+  summarize(avg_cov = mean(cov),
+            sd_cov = sd(cov)) %>%
+  ungroup()
+
+
+```
+
+```{r}
+
+# read in the contig name file for each sample
+manualbin_list <- list.files(path = "./04-analysis/manual_bins/bin_lists", pattern = ".tsv$", full.names = T, recursive = TRUE)
+
+
+manual_bin_contigs <- map_dfr(manualbin_list, function(fn) {
+  fread(fn, sep = "\t") %>%
+  rename(contig = 1) %>%
+  mutate(Bin = basename(fn))
+}) %>%
+  arrange(Bin) %>%
+  mutate(Bin = str_replace_all(Bin, ".abot439.m8_manual_bin_contigs_list.tsv",""))
+
+
+manual_bin_sd <- map_dfr(manualbin_list, function(fn) {
+  fread(fn, sep = "\t") %>%
+  rename(contig = 1) %>%
+  mutate(Bin = basename(fn)) %>%
+  mutate(splitit = contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  filter(cov <= 1000) %>%
+  group_by(Bin) %>%
+  summarize(avg_cov = mean(cov),
+            sd_cov = sd(cov)) %>%
+  ungroup()
+}) %>%
+  arrange(Bin) %>%
+  mutate(Bin = str_replace_all(Bin, ".abot439.m8_manual_bin_contigs_list.tsv",""))
+
+
+
+```
+
+```{r}
+
+manual_bin_contigs %>%
+  mutate(splitit = contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  full_join(., manual_bin_sd, by = "Bin") %>%
+  mutate(over_cov = avg_cov + (sd_cov * 2)) %>%
+  filter(cov <= over_cov)
+
+```
+
+```{r, eval = F}
+
+# filter the manual bins based on the above to remove contigs with very off coverage
+# define the metadata categories to test for significant differences in diversity
+Envmt <- checkm_manual %>%
+  filter(Completeness >= 50) %>%
+  select(`Bin Id`) %>%
+  separate(`Bin Id`, into = "Bin", sep =  "-", extra = "drop") %>%
+  arrange(Bin) %>%
+  unique() %>%
+  pull()
+
+
+species_kruskal_pvals <- lapply(Envmt, function(envmt) {
+contigs_envmt <- manual_bin_contigs %>%
+  as_tibble() %>%
+  filter(Bin == !!(envmt)) %>%
+  mutate(splitit = contig) %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  full_join(., manual_bin_sd, by = "Bin") %>%
+  mutate(over_cov = avg_cov + (sd_cov * 2)) %>%
+  filter(cov <= over_cov)  %>%
+  select(contig) %>%
+  fwrite(., paste0("./04-analysis/manual_bins/bin_lists/",envmt,"_manual_bin_contigs_list_filtered.tsv"), quote = F, col.names = F, sep = "\t")
+})
+
+
+```
+
+```{r}
+
+checkm_manual_cov_filt <- fread("./04-analysis/manual_bins/stats/checkM/coverage_filtered_contig_manual_bins.checkM.txt")
+
+gunc_manual_cov_filt <-fread("./04-analysis/manual_bins/gunc/GUNC.progenomes_2.1.maxCSS_level.tsv")
+
+checkm_manual_cov_filt %>%
+  filter(Completeness >= 50,
+         Contamination <= 10) %>%
+  arrange(desc(Completeness)) %>%
+  select(-`Translation table`, -`N50 (scaffolds)`, -`Longest scaffold (bp)`, -`# scaffolds`, -`# genomes`, -`Mean scaffold length (bp)`, -`GC std (scaffolds > 1kbp)`, -`0`, -`1`, -`2`, -`3`, -`4`, -`5+`) %>%
+  arrange(`Bin Id`)
+
+```
+
+```{r}
+
+checkm_manual_cov_filt %>%
+  filter(Completeness >= 50) %>%
+  arrange(desc(Completeness)) %>%
+  arrange(`Bin Id`) %>%
+  mutate(sampleID = `Bin Id`) %>%
+  separate(sampleID, into = c("sample_ID"), sep = "-", extra = "drop") %>%
+  select(sample_ID, `Bin Id`, `Genome size (bp)`, Completeness, Contamination) %>%
+  rename(genome_size_filt =  3,
+         comp_filt = Completeness,
+         cont_filt = Contamination) %>%
+  full_join(., checkm_manual %>%
+              filter(Completeness >= 50) %>%
+              select(`Bin Id`, `Genome size (bp)`, Completeness, Contamination) %>%
+              mutate(sampleID = `Bin Id`) %>%
+              separate(sampleID, into = c("sample_ID"), sep = "-", extra = "drop") %>%
+              rename(genome_size =  2,
+                     comp = 3,
+                     cont = 4) %>%
+              select(-`Bin Id`) %>%
+              arrange(sample_ID)) %>%
+  select(sample_ID, `Bin Id`,  genome_size, genome_size_filt, comp, comp_filt, cont, cont_filt) %>%
+  arrange(desc(genome_size)) %>%
+  full_join(., gunc_manual_cov_filt %>%
+              rename(`Bin Id` = genome) %>%
+              select(`Bin Id`, pass.GUNC))
+
+```
+
+```{r}
+
+checkm_manual_cov_filt %>%
+  filter(Completeness >= 50) %>%
+  arrange(desc(Completeness)) %>%
+  arrange(`Bin Id`) %>%
+  mutate(sampleID = `Bin Id`) %>%
+  separate(sampleID, into = c("sample_ID"), sep = "-", extra = "drop") %>%
+  select(sample_ID, `Bin Id`, `Genome size (bp)`, Completeness, Contamination) %>%
+  rename(genome_size_filt =  3,
+         comp_filt = Completeness,
+         cont_filt = Contamination) %>%
+  full_join(., checkm_manual %>%
+              filter(Completeness >= 50) %>%
+              select(`Bin Id`, `Genome size (bp)`, Completeness, Contamination) %>%
+              mutate(sampleID = `Bin Id`) %>%
+              separate(sampleID, into = c("sample_ID"), sep = "-", extra = "drop") %>%
+              rename(genome_size =  2,
+                     comp = 3,
+                     cont = 4) %>%
+              select(-`Bin Id`) %>%
+              arrange(sample_ID)) %>%
+  select(sample_ID, `Bin Id`,  genome_size, genome_size_filt, comp, comp_filt, cont, cont_filt) %>%
+  arrange(desc(genome_size)) %>%
+  full_join(., gunc_manual_cov_filt %>%
+              rename(`Bin Id` = genome) %>%
+              select(`Bin Id`, pass.GUNC)) %>%
+  filter(comp_filt >= 50,
+         cont_filt <= 10) # pass.GUNC == TRUE
+
+```
+
+```{r}
+
+# read in the m8 alignment file for each sample
+gc_list <- list.files(path = "04-analysis/manual_bins/gc_rl/cov_filt", pattern = ".gc_rl.tsv.gz", full.names = T, recursive = TRUE)
+
+gc_rl_filt_bins <- map_dfr(gc_list, function(fn) {
+  fread(fn, sep = " ") %>%
+  mutate(Bin = basename(fn)) %>%
+  mutate(Bin = str_replace_all(Bin, ".gc_rl.tsv.gz",""))%>%
+  rename(Contig = Name)
+}) %>%
+  arrange(Bin)
+
+```
+
+```{r}
+
+# plot the distribution  of GC content for the 5 bins with highest number of bases
+#  ERS3774469, SRS3078139, CMC023.A, ERS6256719, SRS6212651
+
+# set contig order by GC%
+gc_rl_contig_order <- gc_rl_filt_bins  %>%
+  filter(str_detect(Bin, "ERS3774469|SRS3078139|CMC023.A|ERS6256719|SRS6212651")) %>%
+  arrange(desc(`%GC`)) %>%
+  pull(Contig)
+
+gc_rl_filt_bins  %>%
+  filter(str_detect(Bin, "ERS3774469|SRS3078139|CMC023.A|ERS6256719|SRS6212651")) %>%
+  mutate(Contig = fct_relevel(Contig, gc_rl_contig_order)) %>%
+  ggplot(., aes(x = Contig, y = `%GC`)) +
+         geom_bar(stat = "identity") + #  
+         scale_fill_manual(values = c("#cc8475","#FFA693","#FAF3DD","#B8F2E6","#AED9E0","#5E6472","#383c44")) +
+         theme_minimal() +
+         theme(axis.text.x = element_blank()) +
+         # ylim(0,100) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         ylab("GC (%)") +
+         xlab("contig no.") +
+         facet_grid(~Bin, scales = "free_x", space = 'free')
+
+
+```
+
+```{r}
+
+gc_rl_filt_bins  %>%
+  filter(str_detect(Bin, "ERS3774469")) %>% # ERS3774469|SRS3078139|CMC023.A|ERS6256719|SRS6212651
+  mutate(splitit = Contig)  %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  ggplot(., aes(x = Length, y = cov, fill = `%GC`)) +
+         geom_point(shape =  21, stroke = 0.1) + #  
+         scale_fill_viridis_c(option  = "A") +
+         theme_minimal() +
+         # ylim(0,100) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         ylab("Coverage") +
+         xlab("Length (bp)") +
+         facet_grid(~Bin)
+
+
+gc_rl_filt_bins  %>%
+  filter(str_detect(Bin, "ERS3774469")) %>% # ERS3774469|SRS3078139|CMC023.A|ERS6256719|SRS6212651
+  mutate(splitit = Contig)  %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  ggplot(., aes(x = Length, y = `%GC`, fill = cov)) +
+         geom_point(shape =  21, stroke = 0.1) + #  
+         scale_fill_viridis_c(option  = "A") +
+         theme_minimal() +
+         # ylim(0,100) +
+         # scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+         ylab("GC (%)") +
+         xlab("Length (bp)") +
+         facet_grid(~Bin)
+
+```
+
+```{r}
+
+gc_rl_df <- gc_rl_filt_bins  %>%
+  filter(str_detect(Bin, "ERS3774469")) %>% # ERS3774469|SRS3078139|CMC023.A|ERS6256719|SRS6212651
+  mutate(splitit = Contig)  %>%
+  separate(splitit, into = c("n","node","l","length","c","cov"), sep = "_") %>%
+  select(-n, -l, -c) %>%
+  mutate(length = as.numeric(length),
+         cov = as.numeric(cov)) %>%
+  select(Contig, Length, `%GC`, cov) %>%
+  # pivot_longer(!Contig, names_to = "Stats", values_to = "numbers") %>%
+  # pivot_wider(names_from = "Contig",  values_from = "numbers") %>%
+  column_to_rownames("Contig")
+
+ERS3774469.pca <- mixOmics::pca(gc_rl_df, ncomp = 2) # , logratio = 'CLR'
+plot(ERS3774469.pca)
+
+# Select out the PC variates into a new table and add the metadata for plotting
+ERS3774469.pca.variates <- as.data.frame(ERS3774469.pca$variates$X)
+ERS3774469.pca.variates <- ERS3774469.pca.variates %>%
+  rownames_to_column("Contig")
+
+ERS3774469.pca.varmet <- ERS3774469.pca.variates %>%
+  left_join(., gc_rl_df %>% 
+              rownames_to_column("Contig"), by = "Contig") %>%
+  distinct() %>%
+  arrange(Contig)
+
+```
+
+```{r}
+
+ERS3774469.pca.varmet %>%
+  ggplot(., aes(PC1, PC2, fill = `%GC`)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    xlab(paste("PC1 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[1]), digits = 4)), "%", sep = "")) +
+    ylab(paste("PC2 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[2]), digits = 4)), "%", sep = "")) +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+ERS3774469.pca.varmet %>%
+  ggplot(., aes(PC1, PC2, fill = Length)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    xlab(paste("PC1 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[1]), digits = 4)), "%", sep = "")) +
+    ylab(paste("PC2 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[2]), digits = 4)), "%", sep = "")) +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+ERS3774469.pca.varmet %>%
+  ggplot(., aes(PC1, PC2, fill = cov)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    xlab(paste("PC1 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[1]), digits = 4)), "%", sep = "")) +
+    ylab(paste("PC2 - ", 100*(round(data.frame(ERS3774469.pca$prop_expl_var$X[2]), digits = 4)), "%", sep = "")) +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+
+```
+
+```{r}
+
+# Euclidean distance, uses the clr-transformed matrix from the mixOmics PCA above
+ERS3774469.euc <- vegan::vegdist(gc_rl_df, method = "mahalanobis", na.rm = T)  # mahalanobis
+ERS3774469.euc.pcoa <- ape::pcoa(ERS3774469.euc)
+
+ERS3774469.euc.pcoavectors <- as.data.frame(ERS3774469.euc.pcoa$vectors)
+ERS3774469.euc.pcoavectors <- ERS3774469.euc.pcoavectors %>%
+  rownames_to_column("Contig")
+
+ERS3774469.euc.vecmet <- ERS3774469.euc.pcoavectors %>%
+  left_join(., gc_rl_df %>% 
+              rownames_to_column("Contig"), by = "Contig")
+
+```
+
+```{r}
+
+ERS3774469.euc.vecmet %>%
+  ggplot(., aes(Axis.1, Axis.2, fill = `%GC`)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+ERS3774469.euc.vecmet %>%
+  ggplot(., aes(Axis.1, Axis.2, fill = Length)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+ERS3774469.euc.vecmet %>%
+  ggplot(., aes(Axis.1, Axis.2, fill = cov)) +
+    geom_point(shape =  21, stroke = 0.1) + #  
+    scale_fill_viridis_c(option  = "A") +
+    theme_minimal(base_size = 14) +
+    labs(color = "Source", shape = "Source") +
+    theme(legend.title = element_text(size = 10))
+
+```
+```{r}
+
+res.km <- factoextra::eclust(gc_rl_df, "kmeans")
+
+factoextra::fviz_gap_stat(res.km$gap_stat)
+factoextra::fviz_cluster(res.km, gc_rl_df, geom = "point")
+
+```
+
+```{r gap_statistic, eval = F}
+
+# set.seed(501) # 4, 250, 501
+gp_cluster_out <- cluster::clusGap(gc_rl_df, d.power = 2, FUN = kmeans, K.max = 6, B = 50) # nstart = 20, B = 500 for real run, spaceH0 = "scaledPCA"
+
+gp_cluster_out$Tab %>%
+  as.data.frame.matrix() %>%
+  mutate(No_clusters = c(1:6)) %>%
+  select(No_clusters, everything())
+
+gp_cluster_out$Tab %>%
+  as.data.frame.matrix() %>%
+  mutate(No_clusters = c(1:6)) %>%
+  select(No_clusters, everything()) %>%
+  ggplot(., aes(x = No_clusters, y = gap)) +
+         geom_line() +
+         geom_point() +
+         geom_errorbar(aes(ymin = gap-SE.sim, ymax = gap+SE.sim), width = 0.2) +
+         theme_minimal(base_size = 12) +
+         theme(axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12)) +
+         theme(axis.text.y = element_text(size = 10)) +
+         theme(panel.grid.minor = element_blank()) +
+         scale_x_continuous(breaks=scales::pretty_breaks(n=6)) +
+         scale_y_continuous(breaks=scales::pretty_breaks(n=10)) +
+        ylab("Gap statistic") +
+        xlab("Number of clusters") +
+        ggtitle("")
+
+```
+
+```{r, eval = F}
+
+km.res <- kmeans(gc_rl_df, 4, nstart = 25)
+
+km.res$cluster %>%
+  as.data.frame() %>%
+  rename(Cluster = 1) %>%
+  rownames_to_column("Contig") %>%
+  arrange(Cluster, Contig)
+
+factoextra::fviz_cluster(km.res, gc_rl_df, geom = "point")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

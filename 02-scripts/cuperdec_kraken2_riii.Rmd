@@ -1,0 +1,304 @@
+---
+title: "Ancient calculus sample cumulative decay curves from Kraken2 GTDB r202 database"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(janitor)
+library(cuperdec)
+library(data.table)
+library(magrittr) ## for pipes!
+library(dplyr) # for mutate()!
+library(tidyverse)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+Load metadata
+```{r load_metadata}
+imv_metadata <- fread("../abot439_evo/00-documentation/library_sample_eager_metadata.tsv") 
+
+riii_metadata <- fread("./00-documentation/riii_metadata.tsv")
+
+```
+
+
+Read in the ancient calculus tables.
+```{r load_data}
+# read in the species table
+anc_calc_raw <- fread("./05-results/riii_kraken2_table_all_data.tsv") 
+
+
+# filter to have only species and remove all species with <1000 reads assigned
+# even filtering out taxa with <10000 counts doesn't help
+anc_calc_sp <- anc_calc_raw %>% 
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  adorn_totals(where = "col") %>%
+  filter(Total > 1000) %>%
+  select(-Total) %>%
+  arrange(species)
+
+```
+
+
+Read in the SourceTracker source tables.
+```{r load_data}
+# read in the species table
+sources_raw <- fread("../strep_clades/05-results/sourceTracker_sources.kraken2.gtdb.report_mpa.tsv") 
+
+
+# read in the file names to add as column headers
+source_names <- fread("../strep_clades/05-results/source_names.tsv", header = F) %>%
+  pull()
+
+# add the sample names to the table
+# move the lineage to the rownames so only samples are left as columns
+sources_raw <- sources_raw %>%
+  column_to_rownames("#Classification")
+
+# add the sample names
+colnames(sources_raw) <- source_names
+
+# move the lineage back to a column
+sources_raw <- sources_raw %>%
+  rownames_to_column("Lineage")
+
+# filter to have only species and remove all species with <1000 reads assigned
+# even filtering out taxa with <10000 counts doesn't help
+source_sp <- sources_raw %>% 
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  adorn_totals(where = "col") %>%
+  filter(Total > 1000) %>%
+  select(-Total) %>%
+  arrange(species) %>%
+  rename_if(str_detect(names(.), "ARS"), ~ str_replace_all(., ".SG1.2",""))
+
+```
+
+Read in the modern calculus tables.
+```{r load_data}
+# read in the species table
+mod_calc_raw <- fread("../strep_clades/05-results/mod_calc.kraken2.gtdb.report_mpa.tsv") 
+
+
+# read in the file names to add as column headers
+mod_names <- fread("../strep_clades/05-results/mod_calc_names.tsv", header = F) %>%
+  pull()
+
+# add the sample names to the table
+# move the lineage to the rownames so only samples are left as columns
+mod_calc_raw <- mod_calc_raw %>%
+  column_to_rownames("#Classification")
+
+# add the sample names
+colnames(mod_calc_raw) <- mod_names
+
+# move the lineage back to a column
+mod_calc_raw <- mod_calc_raw %>%
+  rownames_to_column("Lineage")
+
+# filter to have only species and remove all species with <1000 reads assigned
+# even filtering out taxa with <10000 counts doesn't help
+mod_calc_sp <- mod_calc_raw %>% 
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  adorn_totals(where = "col") %>%
+  filter(Total > 1000) %>%
+  select(-Total) %>%
+  arrange(species)
+
+```
+
+# Ancient calculus
+
+```{r set_database}
+# load the database and convert to a tibble, then clean up dupliate entries
+source_table <- fread("../strep_clades/00-documentation/cuperdec_oral_sources_gtdb_r202.tsv") %>%
+  select(species, Isolation_Source) %>%
+  as_tibble() %>%
+  # remove duplicates
+  distinct()
+  # if there are 2 entries then the species has both an "oral" source and an "other" source
+  # this is b/c at least 1 genome has the isolation source indicated as "oral" in NCBI
+  # since at least 1 genome was isolated from an "oral" site, we can say it's oral
+  # and need to remove the row that has the source as "other"
+source_table <- source_table %>%
+  anti_join(source_table %>%
+            select(species, Isolation_Source) %>% 
+            group_by(species) %>% 
+            count() %>% 
+            filter(n > 1) %>% 
+            select(species) %>% ungroup()) %>%
+  # and then add back those species with an isolation source of "oral"
+  bind_rows(., source_table %>%
+            select(species, Isolation_Source)%>% 
+            group_by(species) %>% 
+            count() %>% 
+            filter(n > 1) %>% 
+            select(species) %>% 
+            ungroup() %>%
+            mutate(Isolation_Source = "oral"))
+
+
+database <- load_database(source_table, target = "oral") %>% print()
+
+```
+
+
+```{r taxatable}
+
+tax_table <- anc_calc_sp %>%
+  full_join(., source_sp) %>%
+  full_join(., mod_calc_sp) %>%
+  # need to convert NA to 0
+  mutate_all(~replace(., is.na(.), 0))
+
+taxatable <- load_taxa_table(tax_table) # %>% print()
+
+```
+
+```{r metamap}
+envtswabs <- data.frame(
+  Sample = envt_names,
+  Sample_Source  = "Control")
+
+metadata <- imv_metadata  %>%
+  # now make the names match what was used in eager and what the species tables now have
+  # select only the samples of interest and the sources
+  right_join(., colnames(tax_table %>% select(-species)) %>% as_data_frame(.) %>% rename(Eager_label = 1)) %>%
+  # plot by study for some clarity
+  # need to change the names of the source studies to the sources to keep consistent with other figures
+  mutate(Study = ifelse(str_detect(Study, "Oh2016"),"Skin",
+                        ifelse(str_detect(Study, "Slon2017"),"Sediment",
+                               ifelse(str_detect(Study, "Obregon|Rampelli"),"Stool",
+                                                 ifelse(str_detect(Study, "HMP|Sankaranarayanan2015"),"Stool",
+                                                        ifelse(str_detect(Eager_label, "ARS"),"Archaeological bone", Study)))))) %>%
+  mutate(Study = ifelse(str_detect(Eager_label, "JAE|VLC"), "Modern calculus", Study))  %>%
+  mutate(Study = ifelse(str_detect(Eager_label, "KT"), "Mann2018", Study))  %>%
+  mutate(Study = ifelse(str_detect(Eager_label, "SMH"), "SMH", Study))  %>%
+  mutate(Study = ifelse(str_detect(Eager_label, "SRR68773"), "Mann2018", Study))  %>%
+  mutate(Study = ifelse(str_detect(Eager_label, "SRR059389|SRR059425|SRR059455|SRR059917|SRR060358"), "Stool", Study))  %>%
+  arrange(Study, Eager_label) %>%
+  select(Study, Eager_label) %>%
+  distinct() %>%
+  drop_na(Study) %>%
+  bind_rows(., riii_metadata %>%
+              select(Study, Sample_ID) %>%
+              rename(Eager_label = Sample_ID) %>%
+              filter(Study == "Control")) %>%
+  mutate(Study = fct_relevel(Study, "Stool","Skin","Sediment","Archaeological bone","Control","Modern calculus","RIII","SMH"))
+
+metadata_map <- load_map(metadata,
+                     sample_col = "Eager_label",
+                     source_col = "Study")  %>%
+  bind_rows(envtswabs)
+
+```
+
+
+```{r}
+# in metadata_map but not taxatable
+taxatable %>% select(Sample) %>% unique() %>%
+  anti_join(., metadata_map) %>%
+  arrange(Sample)
+
+
+# in taxatable but not metadata_map
+metadata_map %>%
+  anti_join(., taxatable %>% select(Sample) %>% unique())
+
+
+```
+
+
+```{r simple_curve}
+curves <- calculate_curve(taxatable, database = database) %>%
+  print()
+
+plot_cuperdec(curves)
+
+
+
+curves %>%
+  group_by(Sample) %>%
+  slice_min(Rank, n = 20) %>%
+  left_join(., source_table %>%
+              rename(Taxon = species), by = "Taxon")
+
+```
+
+
+```{r metadata_curve}
+plot_cuperdec(curves, metadata_map, restrict_x = 250)
+
+```
+
+```{r filter_curve}
+
+filter_result <- simple_filter(curves, percent_threshold = 99) 
+
+plot_cuperdec(curves, metadata_map, filter_result, restrict_x = 250)
+
+```
+
+```{r hard_rank_burnin}
+
+rank_burnin_result <- hard_burnin_filter(curves, percent_threshold = 30, rank_burnin = 0.1) 
+
+# restrict the plot to only the 1st 250 taxa
+cd_curve_plot <- plot_cuperdec(curves, metadata_map, rank_burnin_result, restrict_x = 250)
+cd_curve_plot
+
+# ggsave("~/Desktop/MID_cuperdec_rank7_pct50.pdf", plot = cd_curve_plot, device = "pdf",
+#        scale = 1, width = 7, height = 5, units = c("in"), dpi = 300)
+
+```
+
+```{r adaptive_rank_burnin}
+
+adaptive_rank_burnin_result <- adaptive_burnin_filter(curves, percent_threshold = 50) 
+cd_curve_plot <- plot_cuperdec(curves, metadata_map, adaptive_rank_burnin_result, restrict_x = 250)
+cd_curve_plot
+
+
+# ggsave("./06-publication/supplemental_figs/Fig_S1_riii_kraken2_gtdb_cuperdec.png", plot = cd_curve_plot, device = "png",
+#        scale = 1, width = 7, height = 5, units = c("in"), dpi = 300)
+# 
+# ggsave("./06-publication/supplemental_figs/Fig_S1_riii_kraken2_gtdb_cuperdec.pdf", plot = cd_curve_plot, device = "pdf",
+#        scale = 1, width = 7, height = 5, units = c("in"), dpi = 300)
+
+```
+
+```{r discard_list, eval = F}
+# poorly-preserved samples
+discard_list <- adaptive_rank_burnin_result %>% filter(!Passed) %>%
+  # select only the samples, not the source controls
+  left_join(., metadata_map, by = "Sample") %>%
+  distinct() %>%
+  filter(!str_detect(Sample_Source, "Stool|Sediment|Archaeological bone|Skin|Control")) %>%
+  # select(Sample) %>%
+  unique()
+discard_list
+
+fwrite(discard_list, "./05-results/cuperdec_kraken2_poor_samples.tsv", sep = "\t", quote = F)
+
+```
+
+
+

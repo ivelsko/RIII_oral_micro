@@ -1,0 +1,239 @@
+---
+title: "RIII project comparative sample selection"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(janitor)
+library(data.table)
+library(tidyverse)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+Read in the RIII calculus table.
+```{r load_data}
+
+imv_metadata <- fread("../abot439_evo/00-documentation/library_sample_eager_metadata.tsv")
+
+amgd <- fread("https://raw.githubusercontent.com/SPAAM-community/AncientMetagenomeDir/master/ancientmetagenome-hostassociated/samples/ancientmetagenome-hostassociated_samples.tsv")
+
+
+```
+
+```{r}
+# check the country names
+imv_metadata %>%
+  select(Country) %>%
+  unique() %>%
+  arrange(Country)
+
+amgd %>%
+  select(geo_loc_name) %>%
+  unique() %>%
+  arrange(geo_loc_name)
+
+```
+
+```{r}
+# calculus samples from in or close to England, from +/- 400 years
+imv_metadata %>%
+  filter(str_detect(Country, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+  select(Study, Eager_label, Age_BP, Country) %>%
+  filter(Age_BP <= 1100 & Age_BP >= 250) %>%
+  arrange(Age_BP, Study)
+
+amgd %>%
+  filter(str_detect(geo_loc_name, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+  select(project_name, sample_name, sample_age, geo_loc_name, material) %>%
+  filter(sample_age <= 1100 & sample_age >= 200,
+         material == "dental calculus") %>%
+  arrange(sample_age, project_name)
+
+```
+
+```{r data_tables}
+# Now make a complete Kraken2-GTDB r207 table for them
+
+# read in the species table from strep_clades. It has the column names already
+anc_calc_1_raw <- fread("../strep_clades/05-results/anc_calc.kraken2.gtdb.report_mpa_no_iberian.tsv.gz") %>%
+  select(-matches("B61|G12"))
+
+# read in the species table with samples not included in strep_clades (from abot439_evo)
+anc_calc_2_raw <- fread("../abot439_evo/05-results/additional_calc.kraken2.gtdb.report_mpa.tsv") 
+
+# read in the file names to add as column headers
+anc_names <- fread("../abot439_evo/05-results/kraken2_names.tsv", header = F) %>%
+  rename(Library_ID = 1) %>%
+  mutate(Library_ID = str_replace_all(Library_ID, ".SG1.1", ""),
+         Library_ID = str_replace_all(Library_ID, ".SG1", "")) %>%
+  pull()
+
+# add the sample names to the table
+# move the lineage to the rownames so only samples are left as columns
+anc_calc_2_raw <- anc_calc_2_raw %>%
+  column_to_rownames("#Classification")
+
+# add the sample names
+colnames(anc_calc_2_raw) <- anc_names
+
+# move the lineage back to a column
+anc_calc_2_raw <- anc_calc_2_raw %>%
+  rownames_to_column("Lineage")
+
+```
+
+```{r controls}
+# RIII environmental swabs
+r3_envt_swabs <- fread("./05-results/riii_environmental_swabs.kraken2.gtdb.report_mpa.tsv")
+
+# read in the file names to add as column headers
+envt_names <- fread("./05-results/kraken2_riii_envmt_names.tsv", header = F) %>%
+  rename(Library_ID = 1) %>%
+  pull()
+
+# add the sample names to the table
+# move the lineage to the rownames so only samples are left as columns
+r3_envt_swabs <- r3_envt_swabs %>%
+  column_to_rownames("#Classification")
+
+# add the sample names
+colnames(r3_envt_swabs) <- envt_names
+
+# move the lineage back to a column
+r3_envt_swabs <- r3_envt_swabs %>%
+  rownames_to_column("Lineage")
+
+
+# RIII blanks
+r3_blanks <- fread("./05-results/riii_blanks.kraken2.gtdb.report_mpa.tsv")
+
+# read in the file names to add as column headers
+blanks_names <- fread("./05-results/kraken2_riii_blank_names.tsv", header = F) %>%
+  rename(Library_ID = 1) %>%
+  pull()
+
+# add the sample names to the table
+# move the lineage to the rownames so only samples are left as columns
+r3_blanks <- r3_blanks %>%
+  column_to_rownames("#Classification")
+
+# add the sample names
+colnames(r3_blanks) <- blanks_names
+
+# move the lineage back to a column
+r3_blanks <- r3_blanks %>%
+  rownames_to_column("Lineage")
+
+
+```
+
+```{r combine_tables}
+# now combine the tables
+anc_calc_raw <- anc_calc_1_raw %>%
+  full_join(., anc_calc_2_raw, by = "Lineage") %>%
+  # need to convert NA to 0
+  mutate_all(~replace(., is.na(.), 0))
+
+```
+
+```{r select_samples}
+
+# now subset to include only the samples we'll use here
+all_included_samples <- imv_metadata %>%
+  filter(str_detect(Country, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+  select(Study, Eager_label, Age_BP, Country) %>%
+  filter(Age_BP <= 1100 & Age_BP >= 250) %>%
+  select(Eager_label) %>%
+  unique() %>%
+  pull()
+
+riii_table_raw <- anc_calc_raw %>%
+  select(matches(c("Lineage", all_included_samples %>% str_c(collapse = "|")))) %>%
+  full_join(., r3_envt_swabs, by = "Lineage") %>%
+  full_join(., r3_blanks, by = "Lineage") %>%
+  # need to convert NA to 0
+  mutate_all(~replace(., is.na(.), 0))
+
+```
+
+```{r read_filter}
+
+r3b_gcrl <- fread("./00-documentation/riii_blanks_read_stats.tsv")
+
+# list the samples included in this study
+included_raw <- riii_table_raw %>%
+  slice_head(n = 1) %>%
+  pivot_longer(!Lineage, names_to = "Eager_label", values_to = "Counts") %>%
+  select(Eager_label) %>%
+  mutate(Eager_label = str_replace_all(Eager_label, "calc","")) %>%
+  unique() %>%
+  arrange()
+
+gc_rl_table <- imv_metadata %>%
+  inner_join(., included_raw, by = "Eager_label") %>%
+  select(Eager_label, avg_gc, avg_rl, No_reads_no_human) %>%
+  bind_rows(., r3b_gcrl) %>%
+  # now add back metadata
+  left_join(., imv_metadata %>%
+               select(Eager_label, Study, Age_BP, Country), by = "Eager_label") %>%
+  select(Eager_label, Study, Age_BP, Country, avg_gc, avg_rl, No_reads_no_human) %>%
+  distinct() %>%
+  mutate(Study = ifelse(is.na(Study),"RIII blanks", Study),
+         Country = ifelse(str_detect(Eager_label, "R3"),"England", Country),
+         Country = ifelse(str_detect(Study, "Farrer2021|Weyrich2017"), "England", Country),
+         Age_BP = ifelse(is.na(Age_BP),10,Age_BP))
+
+# samples with < 1M reads
+less_1M_reads <- gc_rl_table %>%
+  filter(No_reads_no_human < 1000000) %>%
+  select(Eager_label) %>%
+  pull()
+
+
+# remove samples with <1M reads from the table
+riii_table_raw_filtered <- riii_table_raw %>%
+  select(-matches(less_1M_reads %>% str_c(collapse = "|"))) %>%
+  full_join(., r3_envt_swabs, by = "Lineage")
+
+```
+
+
+```{r save_final_table, eval = F}
+# and save the file for analyses
+
+fwrite(riii_table_raw_filtered, "./05-results/riii_kraken2_table_all_data.tsv", quote = F, sep = "\t")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

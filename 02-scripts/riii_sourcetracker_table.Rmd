@@ -1,0 +1,231 @@
+---
+title: "RIII calculus MALT SourceTracker table"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output:
+    github_document:
+        fig_width: 8
+        fig_height: 6
+        toc: true
+---
+
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(data.table)
+library(janitor)
+library(tidyverse)
+
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+riii_metadata <- fread("./00-documentation/riii_metadata.tsv") %>%
+  select(Library_ID, Sample_or_Control, Study) %>%
+  unique()
+
+```
+
+```{r load_data}
+# read in the species table by sample
+# riii_raw <- fread("./05-results/riii_simple_malt_refseq_species.tsv")  %>%
+#   filter(!str_detect(`#Datasets`, "Homo sapiens|Not assigned")) %>%
+#   # remove blanks
+#   select(-matches("Bag|Box|FR|GL|HS|BL"))
+
+# read in the species table by library
+riii_raw <- fread("./05-results/riii_simple_by_library_Comparison_species.tsv")  %>%
+  filter(!str_detect(`#Datasets`, "Homo sapiens|Not assigned"))
+# %>%
+#   # remove blanks
+#   select(-matches("Bag|Box|FR|GL|HS|BL"))
+
+riii_raw <- rename(riii_raw, Species = `#Datasets`)
+colnames(riii_raw) <- gsub(".unmapped","", colnames(riii_raw))
+
+```
+
+```{r}
+# read in table used in Pacific project for SourceTracket to get the sources
+source_table <- fread("~/archgen/microbiome_calculus/pacific_calculus/05-Documentation.backup/oceania_sourcetracker_table_species.txt")
+
+source_meta <- fread("~/archgen/microbiome_calculus/pacific_calculus/05-Documentation.backup/source_tracker_mappingfile_20220722.tsv") %>%
+  filter(!str_detect(Study, "thisStudy|Naegele"))
+
+source_samples <- source_meta %>%
+  pull(`#SampleID`)
+
+```
+
+```{r}
+# create a table with only the sources
+only_sources <- source_table %>%
+  select(matches(source_samples %>% str_c(collapse = "|"))) %>%
+  bind_cols(., source_table %>% select(`#OTU ID`)) %>%
+  select(`#OTU ID`, everything())
+
+```
+
+```{r}
+# read in metadata for DeepEvo and Ottoni2021
+# Need to filter out the non-human primates and African samples from DeepEvo, and blanks from Ottoni2021
+
+other_metadata <- fread("~/archgen/microbiome_calculus/pacific_calculus/05-Documentation.backup/eisenhoffer2020_ottoni2021_deepevo_mann2018w_metadata.tsv") %>%
+  filter(str_detect(Study, "Fellows|Ottoni"),
+         Sample_group != "non_human_primate",
+         !str_detect(Sample_alias, "BLEX")) %>%
+  # now remove the African samples and modern data
+  filter(!str_detect(Sample_alias, "MOA|OAK|TAF|ESA|PYK|JAE|VLC"))
+
+deo_samples <- other_metadata %>%
+  mutate(Sample_alias = ifelse(Study == "Ottoni2021",Run_accession,Sample_alias)) %>%
+  pull(Sample_alias)
+  
+```
+
+```{r}
+# combine metadata and save
+other_metadata %>%
+  mutate(Sample_alias = ifelse(Study == "Ottoni2021",Run_accession,Sample_alias)) %>%
+  select(Sample_alias, Study) %>%
+  # remove sample with low sequencing depth
+  filter(!str_detect(Sample_alias, "DLV002")) %>%
+  mutate(BarcodeSequence = NA,
+         LinkerPrimerSequence = NA,
+         SourceSink = "sink",
+         Env = "calculus") %>%
+  select(Sample_alias, BarcodeSequence, LinkerPrimerSequence, Study, SourceSink, Env) %>%
+  rename(`#SampleID` = Sample_alias) %>%
+  bind_rows(., source_meta) %>%
+  # need to add the riii metadata too!!
+  bind_rows(., riii_metadata %>%
+              # filter(!str_detect(Library_ID, "Bag|Box|FR|GL|HS|BL")) %>%
+              # filter(Sample_or_Control == "Sample") %>%
+              rename(`#SampleID` = Library_ID) %>%
+              select(`#SampleID`) %>%
+              mutate(BarcodeSequence = NA,
+                     LinkerPrimerSequence = NA,
+                     Study = "RIII",
+                     SourceSink = "sink",
+                     Env = "calculus")) %>%
+  arrange(`#SampleID`) %>%
+  fwrite(., "~/archgen/microbiome_calculus/RIII_simple/00-documentation/sourcetracker_mapping_file_riii_w_blanks_by_library.tsv", sep = "\t", quote = T)
+
+
+```
+
+
+```{r}
+# read in deepEvo and Ottoni2021 tables
+additional_raw <- fread("~/archgen/microbiome_calculus/pacific_calculus/05-Documentation.backup/ottoni2021_malt_refseq_species.tsv") %>%
+  full_join(., fread("~/archgen/microbiome_calculus/pacific_calculus/05-Documentation.backup/deep_evo_malt_refseq_comparison_species.tsv"), by = "#Datasets") %>%
+  rename(Species = 1) %>%
+  # select only samples
+  column_to_rownames("Species") %>%
+  select(matches(deo_samples %>% str_c(collapse = "|"))) %>%
+  replace(is.na(.), 0) %>%
+  rownames_to_column("Species") %>%
+  pivot_longer(!Species, names_to = "Library_ID", values_to = "Counts") %>%
+  mutate(Library_ID = str_replace_all(Library_ID, ".unmapped","")) %>%
+  pivot_wider(names_from = "Library_ID", values_from = "Counts", values_fill = 0) %>%
+  # remove sample with low sequencing depth
+  select(-matches("DLV002"))
+
+```
+
+```{r}
+# make the table, then it needs to be rarefied
+full_st_table <- riii_raw %>%
+  full_join(., additional_raw, by = "Species") %>%
+  full_join(., only_sources %>%
+              rename(Species = 1), by = "Species") %>%
+  replace(is.na(.), 0) %>%
+  adorn_totals(where = "col") %>%
+  filter(Total > 0) %>%
+  select(-Total) %>%
+  rename(`#OTU ID` = Species)
+
+```
+
+
+
+```{r}
+# now write the table to save it 
+
+fwrite(full_st_table, "~/archgen/microbiome_calculus/RIII_simple/05-results/sourcetracker_input_table_w_blanks_by_library.tsv", quote = F, sep = "\t")
+
+```
+
+Create a rarefied table with phyloseq to use in SourceTracker
+```{r}
+# all_species_decontam is the OTU table
+# what is the lowest sequencing depth?
+full_st_table %>%
+  rename(Species = `#OTU ID`) %>%
+  pivot_longer(!Species, names_to = "Library_ID", values_to = "Counts") %>%
+  pivot_wider(names_from = "Species", values_from = "Counts") %>%
+  adorn_totals(where = "col") %>%
+  select(Library_ID, Total) %>%
+  arrange(Total) %>%
+  as_tibble()
+
+# Make the table a matrix
+st_table <- full_st_table %>%
+  column_to_rownames("#OTU ID") %>%
+  as.matrix(.)
+
+# make an accompanying taxonomy matrix
+st_taxa <- full_st_table %>%
+  rename(Species = `#OTU ID`) %>%
+  mutate(Species_2 = Species) %>%
+  select(Species, Species_2) %>%
+  column_to_rownames("Species") %>%
+  rename(Species = Species_2) %>%
+  as.matrix(.)
+
+# now convert to a phyloseq object
+library("phyloseq")
+OTU = otu_table(st_table, taxa_are_rows = TRUE)
+TAX = tax_table(st_taxa)
+
+st_physeq = phyloseq(OTU, TAX)
+st_physeq
+
+rare_st_physeq <- rarefy_even_depth(st_physeq, rngseed = 14)
+
+# save the rarefied table (from https://github.com/joey711/phyloseq/issues/613)
+# Extract abundance matrix from the phyloseq object
+OTU1 <- as(otu_table(rare_st_physeq), "matrix")
+# transpose if necessary
+if(taxa_are_rows(rare_st_physeq)){OTU1 <- t(OTU1)}
+# Coerce to data.frame
+st_table_rare <- as.data.frame(OTU1)
+
+# check the depth of rarefaction
+st_table_rare %>%
+  rownames_to_column("#OTU ID") %>%
+  adorn_totals(where = "col") %>%
+  select(`#OTU ID`,Total) %>%
+  as_tibble()
+
+# make the rownames a column with the appropriate header
+st_table_rare <- st_table_rare %>%
+  rownames_to_column("Library_ID") %>%
+  gather("#OTU ID","Counts",2:ncol(.)) %>%
+  spread(Library_ID, Counts)
+
+# save the rarefied table
+#** be sure to add '# Constructed from biom file' (no quotes) as the first line of the table after writing it out here
+fwrite(st_table_rare, "~/archgen/microbiome_calculus/RIII_simple/05-results/sourcetracker_input_table_w_blanks_rarefied_by_library.tsv", quote = F, sep = "\t")
+
+```
+
+
+
+

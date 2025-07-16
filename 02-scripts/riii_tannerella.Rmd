@@ -1,0 +1,108 @@
+---
+title: "RIII project Tannerella genomes"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(janitor)
+library(data.table)
+library(tidyverse)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+imv_metadata <- fread("../cmc_deep_assembly/00-documentation/library_sample_eager_metadata.tsv") %>%
+  filter(str_detect(Country, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+  select(Study, Eager_label, Secondary_sample_accession, Age_BP, Country) %>%
+  filter(Age_BP <= 1100 & Age_BP >= 250) %>%
+  select(Secondary_sample_accession, Eager_label, Study) %>%
+  unique() %>%
+  mutate(Eager_label = str_replace_all(Eager_label, ".A0101",""),
+         Eager_label = str_replace_all(Eager_label, ".B0101","")) %>%
+  # fill in the missing accessions for unpublished data
+  mutate(Secondary_sample_accession = ifelse(str_detect(Eager_label, "R3"),"ERSX0002001",
+                                             ifelse(str_detect(Eager_label, "SMH005"),"ERSX0003001",
+                                                    ifelse(str_detect(Eager_label, "SMH007"),"ERSX0003002",
+                                                           ifelse(str_detect(Eager_label,"SMH008"),"ERSX0003003", Secondary_sample_accession)))))
+
+amgd <- fread("https://raw.githubusercontent.com/SPAAM-community/AncientMetagenomeDir/master/ancientmetagenome-hostassociated/samples/ancientmetagenome-hostassociated_samples.tsv") 
+
+# SMH is ERSX000300*
+
+```
+
+
+```{r}
+
+# all RIII MAGs
+r3_mags <- fread("../../microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv") %>%
+  filter(str_detect(sample_binID, "ERSX0002"),
+         pass.MIMAG_medium == TRUE)
+
+# Very high quality RIII MAGs
+r3_mags_high <- r3_mags %>%
+  filter(pass.MIMAG_high == TRUE,
+         pass.GUNC == TRUE,
+         pass.Polyrate == TRUE)
+
+```
+
+```{r}
+
+# all Tannerella MAGs
+tf_mags <- fread("../../microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv") %>%
+  filter(str_detect(GTDBlineage, "Tannerella"),
+         pass.MIMAG_medium == TRUE) %>%
+  separate(sample_binID, into = c("Secondary_sample_accession","binID"), sep = "-", extra = "merge") %>%
+  # now filter these to be only MAGs from the comparative samples you're using
+  inner_join(., imv_metadata, by = "Secondary_sample_accession") %>%
+  select(Study, Eager_label, everything())
+
+```
+
+
+```{r}
+# now save a file with symlinks for the mags
+tf_mags %>%
+  select(Secondary_sample_accession, binID) %>%
+  distinct() %>%
+  unite(folder, Secondary_sample_accession:binID, sep = "-") %>%
+  mutate(path = "ln -s /mnt/archgen/microbiome_paleobiotech/calcBGCecoevo/04-analysis/mag_refinement",
+         # fna == folder,
+         fna = str_replace_all(folder, "$",".fna ."),
+         fa = str_replace_all(fna, "-megahit_00",".bin.r."),
+         fa = str_replace_all(fa, "-megahit_0",".bin.r."),
+         fa = str_replace_all(fa, "fna .","fa")) %>%
+  select(path, folder, fna, fa) %>%
+  unite(link, path:fa, sep = "/") %>%
+  fwrite(., "01-data/T_forsythia/ancient_mags/symlink_anc_tf_mags.sh", quote = F, col.names = F, sep = "\t")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

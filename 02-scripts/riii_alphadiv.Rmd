@@ -1,0 +1,355 @@
+---
+title: "RIII calculus MALT alpha diversity"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output:
+    github_document:
+        fig_width: 8
+        fig_height: 6
+        toc: true
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(data.table)
+library(mixOmics)
+library(rstatix)
+library(vegan)
+library(compositions)
+library(janitor)
+library(tidyverse)
+library(ggstar)
+library(patchwork)
+opts_chunk$set(echo=F, warning=F, message=F, dpi=150)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r set_colors}
+
+Study_sep_colors <- c("RIII" = "#471ca8", 
+                  "Farrer2021" = "#0077b6", 
+                  "Weyrich2017" = "#7fbbda",
+                  "Fagernaes2020" = "#82d3d4", 
+                  "Velsko2019" = "#F24B04",
+                  "Mann2018" = "#e36f9c",
+                  "Mann2018_w" = "#f8a581",
+                  "Velsko2022" = "#D1105A",
+                  "SMH" = "#FFAE03",
+                  "Warinner2014" = "#05A8AA", 
+                  "RIII blanks" = "gray80")
+
+Country_colors <- c("RIII" = "#471ca8",
+                    "Germany" = "#ffd681", 
+                    "England" = "#7fbbda",
+                    "Ireland" = "#82d3d4",
+                    "The Netherlands" = "#e36f9c")
+
+```
+
+```{r load_malt_data, eval = F}
+# read in the species table
+riii_raw <- fread("./05-results/riii_simple_malt_refseq_species.tsv")  %>%
+  filter(!str_detect(`#Datasets`, "Homo sapiens|Not assigned"))
+
+riii_raw <- rename(riii_raw, Species = `#Datasets`)
+colnames(riii_raw) <- gsub(".unmapped","", colnames(riii_raw))
+
+```
+
+
+```{r load_kraken_data}
+
+# read in the species table
+anc_calc_raw <- fread("./05-results/riii_kraken2_table_all_data.tsv") 
+
+poor_samples <- fread("./05-results/cuperdec_kraken2_poor_samples.tsv") %>% pull()
+
+# filter to have only species and remove all species with <1000 reads assigned
+anc_calc_sp <- anc_calc_raw %>% 
+  select(-poor_samples) %>%
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  # adorn_totals(where = "col") %>%
+  # filter(Total > 5000) %>%
+  # select(-Total) %>%
+  arrange(species)
+
+# list species where at least 1 sample has at least 1000 reads assigned
+sp_1000 <- anc_calc_raw %>% 
+  select(-poor_samples) %>%
+  filter(str_detect(Lineage, "s__s__")) %>%
+  separate(Lineage, into = c("domain","phylum","class","order","family","genus","species"), sep = "\\|", extra = "merge") %>%
+  select(-c("domain","phylum","class","order","family","genus")) %>%
+  mutate(species = str_replace_all(species, "s__s__","")) %>%
+  pivot_longer(!species, names_to = "Library_ID", values_to = "Counts") %>%
+  filter(Counts >= 1000) %>%
+  select(species) %>%
+  unique()
+
+# filter the table to include only those species
+anc_calc_sp_filt <- anc_calc_sp %>%
+  inner_join(., sp_1000, by = "species") %>%
+  # then filter out any species with less than 5000 reads across all samples
+  adorn_totals(where = "col") %>%
+  filter(Total > 5000) %>%
+  # now remove any that are < 0.01% abundant
+  mutate(Pct = Total / sum(Total) * 100) %>%
+  filter(Pct > 0.01) %>%
+  select(-Total, -Pct) %>%
+  arrange(species)
+
+```
+
+
+```{r}
+riii_metadata <- fread("./00-documentation/riii_metadata.tsv") %>%
+  select(Sample_ID, Sample_or_Control, Study) %>%
+  unique()
+
+# imv_metadata <- fread("../abot439_evo/00-documentation/library_sample_eager_metadata.tsv") %>%
+#   filter(str_detect(Country, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+#   filter(Age_BP <= 1100 & Age_BP >= 250)
+
+# imv_metadata %>%
+#   fwrite(., "./00-documentation/northern_europe_sample_metadata.tsv", quote = F, sep = "\t")
+
+imv_metadata <- fread("./00-documentation/northern_europe_sample_metadata.tsv")
+ 
+```
+
+```{r, eval = F}
+# Run this once and save the file with average gc/rl, then just read in that file
+
+# get the GC and read length average from the emboss infoseq output
+
+gc_list <- list.files(path = "04-analysis/gc_rl", pattern = ".gc_rl.tsv.gz", full.names = T, recursive = TRUE)
+
+gc_rl_R3 <- map_dfr(gc_list, function(fn) {
+  fread(fn, sep = " ") %>%
+  mutate(sample_ID = basename(fn)) %>%
+  mutate(sample_ID = str_replace_all(sample_ID, ".gc_rl.tsv.gz",""))%>%
+  rename(Contig = Name)
+}) %>%
+  arrange(sample_ID) %>%
+  group_by(sample_ID) %>%
+  summarize(mean_gc = mean(`%GC`),
+            mean_rl = mean(Length)) %>%
+  ungroup()
+
+# gc_rl_R3 %>%
+#   rename(avg_rl = mean_rl,
+#          avg_gc = mean_gc) %>%
+#   mutate(sample_ID = str_replace_all(sample_ID, ".unmapped","")) %>%
+#   fwrite(., "./04-analysis/gc_rl/r3_gc_rl.tsv", sep = "\t", quote = F)
+
+```
+
+```{r}
+
+# read in the gc/rl file for the RIII blanks
+
+r3b_gcrl <- fread("./00-documentation/riii_blanks_read_stats.tsv")
+
+```
+
+```{r}
+
+# plot the total number of reads in each library
+# mostly to show that the blanks are much lower
+
+# list the samples included in this study
+included <- anc_calc_sp %>%
+  slice_head(n = 1) %>%
+  pivot_longer(!species, names_to = "Eager_label", values_to = "Counts") %>%
+  select(Eager_label) %>%
+  mutate(Eager_label = str_replace_all(Eager_label, "calc","")) %>%
+  unique() %>%
+  arrange()
+
+gc_rl_table <- imv_metadata %>%
+  right_join(., included, by = "Eager_label") %>%
+  select(Eager_label, avg_gc, avg_rl, No_reads_no_human) %>%
+  bind_rows(., r3b_gcrl) %>%
+  # now add back metadata
+  left_join(., imv_metadata %>%
+               select(Eager_label, Study, Age_BP, Country), by = "Eager_label") %>%
+  select(Eager_label, Study, Age_BP, Country, avg_gc, avg_rl, No_reads_no_human) %>%
+  distinct() %>%
+  mutate(Study = ifelse(is.na(Study),"RIII blanks", Study),
+         Country = ifelse(str_detect(Eager_label, "R3"),"England", Country),
+         Country = ifelse(str_detect(Study, "Farrer2021|Weyrich2017|Fagernaes2020"), "England", Country),
+         Age_BP = ifelse(is.na(Age_BP),10,Age_BP))
+
+```
+
+```{r}
+library(scales)
+
+gc_rl_table %>%
+  filter(!str_detect(Study, "RIII blanks")) %>%
+  mutate(No_reads_no_human = No_reads_no_human / 1000000,
+         RIII = ifelse(str_detect(Eager_label, "R31|R32|R33"),"Yes","No"),
+         Study_sep = ifelse(str_detect(Eager_label, "SMH"),"SMH", Study)) %>%
+  mutate(Study = fct_relevel(Study, "RIII","Farrer2021","Weyrich2017","Fagernaes2020","Velsko2019","Mann2018","Mann2018_w","Velsko2022","Warinner2014","RIII blanks"),
+         Country = fct_relevel(Country, "RIII","England","Ireland","The Netherlands","Germany")) %>%
+ggplot(., aes(x = Study, y = No_reads_no_human)) +
+  geom_star(aes(starshape = RIII, fill = Study_sep), size = 2,starstroke=0.1, position = position_jitterdodge()) +
+  scale_fill_manual(values = Study_sep_colors) +
+  scale_starshape_manual(values = c(15, 1)) +
+  theme_minimal(base_size = 14) +
+  # scale_y_continuous(trans = 'log10', labels = scales::comma) +
+  scale_y_continuous(trans = 'log10', labels = scales::format_format(big.mark = " ", decimal.mark = ".", scientific = FALSE)) +
+  geom_hline(yintercept = 10, linetype = "dotted") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text = element_text(size=16)) +
+  ylab("No. reads x 10^6") +
+  xlab("Study")
+
+read_counts_plot <- gc_rl_table %>%
+  filter(!str_detect(Study, "RIII blanks")) %>%
+  mutate(No_reads_no_human = No_reads_no_human / 1000000,
+         RIII = ifelse(str_detect(Eager_label, "R31|R32|R33"),"Yes","No"),
+         Country = ifelse(str_detect(Study, "blanks"),"RIII blanks",
+                          ifelse(Study == "RIII" & str_detect(Eager_label, "R3"), "RIII", Country))) %>%
+  mutate(Country = fct_relevel(Country, "RIII","England","Ireland","The Netherlands","Germany","RIII blanks")) %>%
+  ggplot(., aes(x = Country, y = No_reads_no_human)) +
+    geom_star(aes(starshape = RIII, fill = Country), size = 2,starstroke=0.1, position = position_jitter()) +
+    scale_fill_manual(values = Country_colors) +
+    scale_starshape_manual(values = c(15, 1)) +
+    theme_minimal(base_size = 14) +
+     # scale_y_continuous(trans = 'log10', labels = scales::comma) +
+    scale_y_continuous(trans = 'log10', labels = scales::format_format(big.mark = " ", decimal.mark = ".", scientific = FALSE)) +
+    geom_hline(yintercept = 10, linetype = "dotted") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          text = element_text(size=16)) +
+    ylab("No. reads x 10^6") +
+    xlab("Study")
+
+read_counts_plot
+
+# ggsave("./06-publication/prelim_figs/riii_read_counts_plot_country.pdf", plot = read_counts_plot, device = "pdf",
+#        scale = 1, width = 6, height = 5, units = c("in"), dpi = 300)
+
+```
+
+
+
+Now decontam the tables
+```{r decontam, eval = F}
+contaminants <- fread("./05-results/contaminant_species_prev.tsv", sep = "\t")
+
+# remove contaminant species from nt table
+malt_species_decontam <- riii_raw %>%
+  anti_join(., contaminants)
+
+```
+
+
+# Alpha-diversity of all samples
+
+## Observed Species
+```{r os_box}
+# make Relab binary to make a presence/absence table
+presabs_table <- anc_calc_sp_filt %>%
+  pivot_longer(!species, names_to = "Sample_ID", values_to = "Counts") %>%
+  mutate(Counts = ifelse(Counts > 0, 1, 0)) %>%
+  pivot_wider(names_from = "species", values_from = "Counts") %>%
+  column_to_rownames("Sample_ID")
+
+# calculate observed species for each sample with janitor 'adorn_totals'
+anc_calc_sp_filt.os <- presabs_table %>%
+  rownames_to_column("Sample_ID") %>%
+  adorn_totals(., where = "col", name = "Observed_species") %>%
+  select(Sample_ID, Observed_species) %>%
+  mutate(Sample_ID = str_replace_all(Sample_ID, "calc",""))
+
+# plot_box_whisker(anc_calc_sp_filt.os, "Observed_species", "Study", "Study")
+
+os_plot <- anc_calc_sp_filt.os %>%
+  inner_join(gc_rl_table %>%
+               rename(Sample_ID = Eager_label), by = "Sample_ID") %>%
+  filter(Study != "RIII blanks") %>%
+  mutate(No_reads_no_human = No_reads_no_human / 1000000,
+         RIII = ifelse(str_detect(Sample_ID, "R31|R32|R33"),"Yes","No"),
+         Country = ifelse(str_detect(Study, "blanks"),"RIII blanks",
+                          ifelse(Study == "RIII" & str_detect(Sample_ID, "R3"), "RIII", Country))) %>%
+  mutate(Country = fct_relevel(Country, "RIII","England","Ireland","The Netherlands","Germany")) %>%
+  as_tibble() %>%
+  ggplot(., aes(x = Country, y = Observed_species)) +
+    geom_star(aes(starshape = RIII, fill = Country), size = 3,starstroke=0.1, position = position_jitter()) +
+    scale_fill_manual(values = Country_colors) +
+    scale_starshape_manual(values = c(15, 1)) +
+    theme_minimal(base_size = 12) +
+    scale_y_continuous(breaks=scales::pretty_breaks(n=8)) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+         text = element_text(size=14)) +
+    ylab("Number of Species") +
+    xlab("Country")
+
+os_plot
+
+ggsave("./06-publication/prelim_figs/riii_os_plot_country.pdf", plot = os_plot, device = "pdf",
+       scale = 1, width = 7, height = 5, units = c("in"), dpi = 300)
+
+```
+
+
+## Shannon Index
+```{r shannon_diversity}
+# Shannon diversity with the package vegan
+anc_calc_sp_filtm.matrix <- as.matrix(anc_calc_sp_filt %>%
+  pivot_longer(!species, names_to = "Sample_ID", values_to = "Percent") %>%
+  pivot_wider(names_from = "species", values_from = "Percent") %>%
+  mutate(Sample_ID = str_replace_all(Sample_ID,"calc","")) %>%
+  column_to_rownames("Sample_ID"))
+ 
+anc_calc_sp_filtm.shannon <- as.data.frame(diversity(anc_calc_sp_filtm.matrix, index = "shannon"))
+names(anc_calc_sp_filtm.shannon)[1] <- "Shannon_index"
+
+# merge with the metadata file and plot
+anc_calc_sp_filtm.shannon <- anc_calc_sp_filtm.shannon %>%
+  rownames_to_column("Sample_ID")
+
+shannon_sp_plot <- anc_calc_sp_filtm.shannon %>%
+  inner_join(gc_rl_table %>%
+               rename(Sample_ID = Eager_label), by = "Sample_ID") %>%
+  filter(Study != "RIII blanks") %>%
+  mutate(No_reads_no_human = No_reads_no_human / 1000000,
+         RIII = ifelse(str_detect(Sample_ID, "R31|R32|R33"),"Yes","No"),
+         Country = ifelse(str_detect(Study, "blanks"),"RIII blanks",
+                          ifelse(Study == "RIII" & str_detect(Sample_ID, "R3"), "RIII", Country))) %>%
+  mutate(Country = fct_relevel(Country, "RIII","England","Ireland","The Netherlands","Germany")) %>%
+  as_tibble() %>%
+  ggplot(., aes(x = Country, y = Shannon_index)) +
+    geom_star(aes(starshape = RIII, fill = Country), size = 3,starstroke=0.1, position = position_jitter()) +
+    scale_fill_manual(values = Country_colors) +
+    scale_starshape_manual(values = c(15, 1)) +
+    theme_minimal(base_size = 12) +
+    #scale_y_continuous(trans='log10') +
+    #scale_y_continuous(trans='pseudo_log') +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+         text = element_text(size=14)) +
+    ylab("Shannon index") +
+    xlab("Country")
+shannon_sp_plot
+
+ggsave("./06-publication/prelim_figs/shannon_sp_plot_country.pdf", plot = shannon_sp_plot, device = "pdf",
+       scale = 1, width = 6, height = 5, units = c("in"), dpi = 300)
+
+```
+
+
+
+
+
+
+
+

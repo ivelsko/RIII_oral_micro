@@ -1,0 +1,558 @@
+---
+title: "RIII project Tannerella genomes"
+author: "Irina Velsko"
+date: "`r format(Sys.time(), '%b %d, %Y')`"
+output: github_document
+---
+
+```{r load_libraries, echo = F, message = F}
+library(knitr)
+library(janitor)
+library(data.table)
+library(ape)
+library(tidyverse)
+library(ggstar)
+library(ggtree)
+# library(ggnewscale)
+```
+
+Set the working directory of the notebook to the parent directory of the 
+notebook itself.  
+
+```{r setup}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r metadata}
+
+imv_metadata <- fread("./00-documentation/northern_europe_sample_metadata.tsv") %>%
+  # filter(str_detect(Country, "England|United Kingdom|Great Britain|Ireland|Netherlands|Germany")) %>%
+  # select(Study, Eager_label, Secondary_sample_accession, Age_BP, Country) %>%
+  filter(Age_BP <= 1100 & Age_BP >= 250) %>%
+  select(Secondary_sample_accession, Eager_label, Study) %>%
+  unique() %>%
+  mutate(Eager_label = str_replace_all(Eager_label, ".A0101",""),
+         Eager_label = str_replace_all(Eager_label, ".B0101","")) %>%
+  # fill in the missing accessions for unpublished data
+  mutate(Secondary_sample_accession = ifelse(str_detect(Eager_label, "R3"),"ERSX0002001",
+                                             ifelse(str_detect(Eager_label, "SMH005"),"ERSX0003001",
+                                                    ifelse(str_detect(Eager_label, "SMH007"),"ERSX0003002",
+                                                           ifelse(str_detect(Eager_label,"SMH008"),"ERSX0003003", Secondary_sample_accession)))))
+
+riii_meta <- fread("00-documentation/riii_metadata.tsv") %>%
+  select(Sample_ID, Study) %>%
+  distinct() %>%
+  filter(Study != "Control")
+
+amgd <- fread("https://raw.githubusercontent.com/SPAAM-community/AncientMetagenomeDir/master/ancientmetagenome-hostassociated/samples/ancientmetagenome-hostassociated_samples.tsv") 
+
+# SMH is ERSX000300*
+
+```
+
+
+```{r riii_mags}
+
+# all RIII MAGs
+r3_mags <- fread("../../microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv") %>%
+  filter(str_detect(sample_binID, "ERSX0002"),
+         pass.MIMAG_medium == TRUE)
+
+# Very high quality RIII MAGs
+r3_mags_high <- r3_mags %>%
+  filter(pass.MIMAG_high == TRUE,
+         pass.GUNC == TRUE,
+         pass.Polyrate == TRUE)
+
+r3_mags %>%
+  filter(str_detect(GTDBlineage, "Tannerella"))
+
+```
+
+```{r tf_anc_mags}
+
+# # all Tannerella MAGs
+# tf_mags <- fread("../../microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv") %>%
+#   filter(str_detect(GTDBlineage, "Tannerella"),
+#          pass.MIMAG_medium == TRUE) %>%
+#   mutate(BinID = sample_binID) %>%
+#   separate(sample_binID, into = c("Secondary_sample_accession","binID"), sep = "-", extra = "merge") %>%
+#   # now filter these to be only MAGs from the comparative samples you're using
+#   left_join(., imv_metadata, by = "Secondary_sample_accession") %>%
+#   mutate(Study = ifelse(str_detect(BinID, "ERSXERSX0002|ERSX0003"),"RIII",Study),
+#          Eager_label = ifelse(BinID == "ERSX0002001","SMH008.A",
+#                               ifelse(BinID == "ERSX0003003","RIII",Eager_label))) %>%
+#   filter(!str_detect(Eager_label, "R32|R33")) %>%
+#   select(Study, Eager_label, BinID, everything())
+
+
+# tf_mags %>%
+#   select(-matches(c("Common_name|Species|Subspeices|Kind|Habitat|Diet|Other_sample_codes|avg_gc|avg_rl|No_reads_no_human"))) %>%
+#   fwrite(., "./00-documentation/tf_ancient_mags.tsv", quote = F, sep = "\t")
+  
+tf_mags <- fread("./00-documentation/tf_ancient_mags.tsv")
+
+```
+
+```{r}
+# read in the file with reference genome info (isolate, MAG)
+ref_info <- fread("./00-documentation/Tf_reference_genome_info.tsv") %>%
+  mutate(Study = "NCBI RefSeq")
+
+```
+
+```{r combine_metadata}
+# now join the ancient MAG and reference metadata into 1 file
+genome_metadata <- tf_mags %>%
+  select(Study, Secondary_sample_accession, binID, GTDBlineage) %>%
+  distinct() %>%
+  mutate(ssa = Secondary_sample_accession) %>%
+  unite(folder, Secondary_sample_accession:binID, sep = "-") %>%
+  mutate(Bin_ID = str_replace_all(folder, "-megahit_00",".bin.r."),
+         Bin_ID = str_replace_all(Bin_ID, "-megahit_0",".bin.r.")) %>%
+  mutate(GTDBlineage = ifelse(str_detect(GTDBlineage, "forsythia"),"forsythia","unnamed")) %>%
+  rename(archive_accession = ssa) %>%
+  left_join(., amgd %>% 
+               select(sample_age, archive_accession) %>%
+               separate_longer_delim(archive_accession, delim = ","), by = "archive_accession") %>%
+  mutate(sample_age = ifelse(str_detect(archive_accession, "ERSX0002001"),700,
+                             ifelse(str_detect(archive_accession, "ERSX0003003"),700, sample_age))) %>%
+  mutate(Type = "Ancient",
+         Study = ifelse(str_detect(Bin_ID, "ERSX0003003"),"SMH",Study)) %>%
+  select(Bin_ID, Type, GTDBlineage, sample_age, Study) %>%
+  rename(Accession = 1,
+         Species = 3)  %>%
+  bind_rows(., ref_info %>%
+              mutate(sample_age = 10,
+                     Study = "NCBI RefSeq")) %>%
+  mutate(Accession = str_trim(Accession, side = "both"))
+
+
+# eager label for samples with Tannerella MAGs for mapping
+genome_metadata %>%
+  filter(str_detect(Accession, "ERS|SRS")) %>%
+  select(Accession) %>%
+  separate(Accession, into = "Accession", sep = "\\.", extra = "drop") %>%
+  left_join(., imv_metadata %>%
+              rename(Accession = 1), by = "Accession")
+
+```
+
+
+```{r set_colors}
+
+col_age = circlize::colorRamp2(c(0, 1000), c("#ffffff", "#000000"))
+
+Study_colors <- c("Velsko2022" = "#D1105A", 
+                    "Velsko2019" = "#F24B04", 
+                    "Warinner2014" = "#05A8AA", 
+                    "RIII" = "#471CA8", 
+                    "SMH" = "#FFAE03", 
+                    "NCBI RefSeq" = "#0077b6")
+
+
+Country_colors <- c("RIII" = "#471CA8",
+                  "Germany" = "#ffce67", 
+                  "England" = "#66add3",  # "#9076ca", 
+                  "The Netherlands" = "#e36f9c",
+                  "NCBI RefSeq" = "gray80") # gray80
+
+Type_colors <- c("Isolate" = "#69cacc",
+                 "MAG" = "#f79368",
+                 "Ancient" = "#9076ca")
+
+col_fun = circlize::colorRamp2(c(0, 1), c("#e7e9f0", "#172869")) # 75, 130
+
+```
+
+```{r}
+# read in the tree
+# tre_Tf <- ape::read.tree("./05-results/PHYL_T_forsythia_proteintree_RAxML.tre")
+tre_Tf <- ape::read.tree("./04-analysis/phylogenies/phylophlan_aln.raxml.bestTree")
+
+```
+
+```{r tree}
+
+## Root tree by midpoint rooting with phangorn
+tre_Tf <- root(tre_Tf, outgroup = "GCA_003033925.1")
+# tre_Tf <- phangorn::midpoint(tre_Tf)
+
+## Add bootstraps to tree
+# tre_Tf$node.label <- boots
+
+# and check if tree loaded correctly
+plot(tre_Tf)
+ggtree(tre_Tf, ladderize = F) + geom_tiplab(size = 2)
+
+# modify the metadta so RIII is distinct in all categories
+genome_metadata_r3 <- genome_metadata %>%
+  mutate(Country = ifelse(Study == "RIII", "RIII",
+                          ifelse(Study == "Velsko2019", "England",
+                                 ifelse(Study == "Velsko2022", "The Netherlands",
+                                        ifelse(str_detect(Study, "SMH|Warinner"),"Germany","NCBI RefSeq"))))) %>%
+  mutate(Species = ifelse(Study == "RIII", "RIII", Species)) %>%
+  mutate(RIII = ifelse(Accession == "ERSX0002001.bin.r.51", "Yes","No")) %>%
+  select(Accession, Species, Country)
+
+
+p2_Tf <- ggtree(tre_Tf, ladderize = T) %<+% genome_metadata_r3
+p2_Tf_tree <- p2_Tf + geom_star(mapping=aes(fill=Country, starshape=Species), size = 2.5, position="identity",starstroke=0.1) + # geom_tippoint(aes(fill = Country, shape = Species), size = 2) + # size = SNPs
+  geom_treescale() +
+  geom_tiplab(size = 2, offset = 0.005, align = T) + # , as_ylab=TRUE , align = T
+  # geom_text2 is for the bootstrap values
+  # geom_text2(aes(label=label, subset = !is.na(as.numeric(label)) & as.numeric(label) > 70), size = 2) +
+  # scale_fill_gradient(low = "white", high = "black") +
+  scale_fill_manual(values = Country_colors) +
+  # scale_shape_manual(values = c(21, 22, 23, 24)) +
+  scale_starshape_manual(values = c(15,1,19,28))
+
+p2_Tf_tree
+
+
+# get the tree tip order
+tip_order_Tf <- get_taxa_name(p2_Tf_tree)
+
+# save the tip order for plots
+# tip_order_Tf %>%
+#   as.data.frame() %>%
+#   rename(tip_order = 1) %>%
+#   fwrite(., "./05-results/Tf_tip_order.tsv", sep = "\t", quote = F)
+
+tip_order_Tf  %>%
+  as.data.frame() %>%
+  rename(Accession = 1) %>%
+  full_join(., genome_metadata_r3, by = "Accession")
+
+```
+
+```{r}
+
+# ML distance matrix
+dist_Tf <- ape::cophenetic.phylo(tre_Tf)
+
+patristic_dist_tf_ts <- dist_Tf %>%
+  as.data.frame.matrix() %>%
+  # now order alphabetically so the column and row names are in identical order between this and the other matrix
+  rownames_to_column("Bin1") %>%
+  pivot_longer(!Bin1, names_to = "Bin2", values_to = "dist") 
+
+patristic_dist_tf_ts %>%
+  filter(str_detect(Bin1, "GCA_003033925.1|SRS473746.bin.r.58")) %>%
+  summarize(patristic_dist = mean(dist))
+
+# patristic distance w/in Tf
+dist_Tf %>%
+  as.data.frame.matrix() %>%
+  # now order alphabetically so the column and row names are in identical order between this and the other matrix
+  rownames_to_column("Bin1") %>%
+  pivot_longer(!Bin1, names_to = "Bin2", values_to = "dist") %>%
+  filter(!str_detect(Bin1, "GCA_003033925.1|SRS473746.bin.r.58")) %>%
+  summarize(patristic_dist = mean(dist))
+
+
+# patristic distance w/in specific Tf
+dist_Tf %>%
+  as.data.frame.matrix() %>%
+  # now order alphabetically so the column and row names are in identical order between this and the other matrix
+  rownames_to_column("Bin1") %>%
+  pivot_longer(!Bin1, names_to = "Bin2", values_to = "dist") %>%
+  filter(!str_detect(Bin1, "GCA_003033925.1|SRS473746.bin.r.58|ERS2985771.bin.r.5|ERS2985774.bin.r.7|ERSX0003003.bin.r.9|GCF_003860025.1|GCF_003860135.1"),
+         !str_detect(Bin2, "GCA_003033925.1|SRS473746.bin.r.58|ERS2985771.bin.r.5|ERS2985774.bin.r.7|ERSX0003003.bin.r.9|GCF_003860025.1|GCF_003860135.1")) %>%
+  summarize(patristic_dist = mean(dist))
+
+
+
+
+```
+
+
+```{r}
+# Get the completeness/contamination estimates into the metadata table
+
+# read in the dRep completeness/contamination table for the NCBI T. forsythia genomes
+tf_cc <- fread("./04-analysis/dRep/dRep_40_Tf_refs_out/data_tables/genomeInfo.csv") %>%
+  select(genome,completeness,contamination) %>%
+  mutate(genome = str_replace_all(genome, ".fa","")) %>%
+  rename(Accession = genome)
+
+
+
+```
+
+
+```{r}
+vf_table <- fread("./05-results/Tf_virulence_factor_presence.tsv")  %>%
+  pivot_longer(!Genome, names_to = "Gene", values_to = "n") %>%
+  # convert gene counts per genome to present/absent
+  mutate(n = ifelse(n > 0, 1, 0), 
+         n = as.character(n)) %>%
+  # muddle with the annotation to remove the Assembly accession and anything else after it
+  mutate(Genome = str_replace_all(Genome, "GCA_","GCA:"),
+         Genome = str_replace_all(Genome, "GCF_","GCF:")) %>%
+  separate_wider_delim(Genome, delim = "_", names = "Genome", too_many = "drop") %>%
+  mutate(Genome = str_replace_all(Genome, ":","_")) %>%
+  pivot_wider(names_from = "Gene", values_from = "n")
+
+```
+
+```{r virulence_factor_matrix}
+
+vf_metadata_1 <- vf_table %>%
+  full_join(., genome_metadata_r3 %>%
+              rename(Genome = Accession)) 
+
+vf_metadata_2 <- vf_metadata_1 %>%
+  column_to_rownames("Genome")
+
+p2_Tf <- ggtree(tre_Tf, ladderize = T)
+
+p2_Tf_a <- gheatmap(p2_Tf, vf_metadata_2, colnames = F, colnames_angle=90) 
+p2_Tf_a
+
+
+# Control the color, shape and size of the branch tips
+p <- p2_Tf_a %<+% vf_metadata_1 + geom_star(mapping=aes(fill=Country, starshape=Species), size = 2.5, position="identity",starstroke=0.1) + # geom_tippoint(aes(color = Country, shape = Species), size = 2.5) +
+  geom_treescale() +
+  scale_fill_manual(values = c(
+                # Presence/absence colors
+                    "1" = "#172869",
+                    "0" = "#e7e9f0",
+                # Study colors
+                    "Velsko2022" = "#D1105A", 
+                    "Velsko2019" = "#F24B04", 
+                    "Warinner2014" = "#05A8AA", 
+                    "RIII" = "#471CA8", 
+                    "SMH" = "#FFAE03", 
+                    "NCBI RefSeq" = "gray80",  # "#0077b6",
+                # Country colors
+                    "Germany" = "#ffce67", 
+                    "England" = "#66add3",  # "#9076ca", 
+                    "The Netherlands" = "#e36f9c",
+                    "NCBI RefSeq" = "gray80",
+                # Type colors
+                    "Isolate" = "#69cacc",
+                    "MAG" = "#f79368",
+                    "Ancient" = "#9076ca",
+                # Species colors
+                    "forsythia" = "#05A8AA",
+                    "serpentiformis" = "#F24B04",
+                    "unnamed" = "#D1105A"))
+
+
+df = get_heatmap_column_position(p, by="bottom")
+
+# Plot the final tree, matrix and the legends
+p_disc <- p + geom_text(data=df, aes(x, y, label=label), nudge_y=0.5, angle=90, hjust = 0.5) +
+    # geom_tiplab(size = 2, offset = 0.005) + # , as_ylab=TRUE , align = T
+    theme(legend.position="right") + 
+    guides(color = guide_legend(override.aes = list(size=3, alpha = 1))) +
+    # scale_shape_manual(values = c(16,5,3,13)) +
+    # scale_color_manual(values = Country_colors)
+    scale_starshape_manual(values = c(15,1,19,28))
+
+p_disc
+
+# ggsave("06/riii_Tf_tree.pdf", plot = p_disc, device = "pdf",
+#        scale = 1, width = 7, height = 12, units = c("in"), dpi = 300)
+
+```
+
+
+```{r discreet_matrix, eval = F}
+
+genome_metadata2  <-  genome_metadata_r3 %>%
+  column_to_rownames("Accession")
+
+p2_Tf <- ggtree(tre_Tf, ladderize = T)
+
+p2_Tf_a <- gheatmap(p2_Tf, genome_metadata2, colnames = F, colnames_angle=90) 
+
+
+
+# Control the color, shape and size of the branch tips
+p <- p2_Tf_a %<+% genome_metadata2 + geom_tippoint(aes(color = Country, shape = Species), size = 0.9) +
+  geom_treescale() +
+  scale_fill_manual(values = c(
+                # Study colors
+                    "Velsko2022" = "#D1105A", 
+                    "Velsko2019" = "#F24B04", 
+                    "Warinner2014" = "#05A8AA", 
+                    "RIII" = "#471CA8", 
+                    "SMH" = "#FFAE03", 
+                    "NCBI RefSeq" = "gray80",  # "#0077b6",
+                # Country colors
+                    "Germany" = "#ffce67", 
+                    "England" = "#66add3",  # "#9076ca", 
+                    "The Netherlands" = "#e36f9c",
+                    "NCBI RefSeq" = "gray80",
+                # Type colors
+                    "Isolate" = "#69cacc",
+                    "MAG" = "#f79368",
+                    "Ancient" = "#9076ca",
+                # Species colors
+                    "forsythia" = "#05A8AA",
+                    "serpentiformis" = "#F24B04",
+                    "unnamed" = "#D1105A")) +
+  scale_size_continuous(limits = c(0,3))
+
+df = get_heatmap_column_position(p, by="bottom")
+
+# Plot the final tree, matrix and the legends
+p_disc <- p + geom_text(data=df, aes(x, y, label=label), nudge_y=0.5, angle=0, hjust = 0.5) +
+    # geom_tiplab(size = 2, offset = 0.005) + # , as_ylab=TRUE , align = T
+    theme(legend.position="right") + 
+    guides(colour = guide_legend(override.aes = list(size=3, alpha = 1))) +
+    scale_shape_manual(values = c(16,5,3,13)) +
+    scale_color_manual(values = Country_colors)
+
+p_disc
+
+# ggsave("06-publication/prelim_figs/prelim_Tf_raxml_tree_tip_country_vf_matrix.pdf", plot = p_disc, device = "pdf",
+#        scale = 1, width =15, height = 5, units = c("in"), dpi = 300)
+
+```
+
+```{r combine_matrices, eval = F}
+
+# also add a matrix with the completeness and contamination
+bin_metadata2  <-  bin_metadata  %>%
+  select(Bin, completeness, contamination, GUNC.CSS) %>%
+  mutate(completeness = completeness / 100,
+         contamination = scales::rescale(contamination, to=c(0,1))) %>%
+  column_to_rownames("Bin")
+
+
+p2 <- p_disc + new_scale_fill()
+p_disc_c <- gheatmap(p2, bin_metadata2, offset=15, width=.6, colnames_angle=0, colnames_offset_y = 10) +
+         scale_fill_gradient(low = "white", high = "black", name = "Quality scores") +
+    theme(legend.position = 'none')
+         # scale_fill_viridis_c(option="A", name="completeness")
+
+p_disc_c
+
+```
+
+## DamageProfiler plots
+
+```{r}
+# Ancient calculus Tf MAGs 5' damage tables
+anc_calc_list <- list.files(path = "./04-analysis/DamageProfiler/out", pattern = "5pCtoT_freq", recursive = T, full.names = T)
+
+anc_calc_Tf_damage <- map_dfr(anc_calc_list, function(fn) {
+  fread(fn, sep = "\t", skip = 4, fill = T, col.names = c("position","damage")) %>%
+  mutate(Sample = (fn))
+}) %>%
+  mutate(Sample = str_remove_all(Sample, "./04-analysis/DamageProfiler/out/"),
+         Sample = str_remove_all(Sample, ".mapped_q25l30_rmdup/5pCtoT_freq.txt"),
+         Sample = str_replace_all(Sample, "/5pCtoT_freq.txt",".by_lib.Tf")) %>%
+  mutate(Reference = ifelse(str_detect(Sample, ".Tf$"),"forsythia","serpentiformis"),
+         Country = ifelse(str_detect(Sample, "CS|WIG"),"England",
+                          ifelse(str_detect(Sample, "MID"),"The Netherlands",
+                                 ifelse(str_detect(Sample, "G12|SMH"),"Germany","RIII"))))
+
+anc_calc_Tf_damage %>%
+  filter(damage > 0.5)
+
+# anc_calc_Tf_damage %>%
+#   filter(!str_detect(Sample, "by_lib")) %>%
+#   fwrite(., "./05-results/Tf_DamageProfiler_5pCtoT_table.tsv", quote = F, sep = "\t")
+
+```
+
+```{r}
+
+# plot grouped by country?
+
+anc_calc_Tf_damage %>%
+  filter(!str_detect(Sample, "by_lib|YaleRun"),
+         # damage < 0.5,
+         Reference == "forsythia") %>%
+  mutate(Country = fct_relevel(Country, "RIII","England","The Netherlands","Germany")) %>%
+  arrange(Country) %>%
+  ggplot(., aes(x = position, y = damage, group = Sample)) + # , group = Country
+         geom_line(aes(color = Country), linewidth=0.5) + # , linetype = classified
+         # geom_point() +
+         theme_minimal(base_size = 8) +
+         theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0.5, size = 8)) +
+         theme(axis.text.y = element_text(size = 8)) +
+         scale_color_manual(values = Country_colors) +
+         # theme(panel.grid.minor = element_blank()) +
+         scale_y_continuous(breaks=scales::pretty_breaks(n=6)) +
+         scale_x_continuous(breaks=scales::pretty_breaks(n=10)) +
+         # ylim(0,0.4) +
+         ylab("Frequency") +
+         xlab("Position (bp)") +
+         facet_wrap(~Country)
+  
+  
+```
+
+```{r}
+
+# T. serpentiformis
+
+g12_tannerella <- damage_table %>%
+  filter(str_detect(Sample, "G12")) %>%
+  mutate(Concatenated = ifelse(str_detect(Sample, "pub"),"Yes","No")) %>%
+  ggplot(., aes(x = position, y = damage, group = Sample)) + # , group = Country
+         geom_line(aes(color = Reference, linetype = Concatenated), linewidth=0.5) + # , linetype = classified
+         # geom_point() +
+         theme_minimal(base_size = 8) +
+         theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0.5, size = 8)) +
+         theme(axis.text.y = element_text(size = 8)) +
+         scale_color_manual(values = c("#05A8AA", "#F24B04")) +
+         # theme(panel.grid.minor = element_blank()) +
+         scale_y_continuous(breaks=scales::pretty_breaks(n=6)) +
+         scale_x_continuous(breaks=scales::pretty_breaks(n=10)) +
+         # ylim(0,0.4) +
+         ylab("Frequency") +
+         xlab("Position (bp)")
+
+g12_tannerella
+
+# ggsave("./06-publication/supplemental_figures/Figure_S2/G12_Tf_damage_plots.pdf", plot = g12_tannerella, device = "pdf",
+#        scale = 1, width = 8, height = 5, units = c("in"), dpi = 300)
+
+# ggsave("./06-publication/supplemental_figures/Figure_S2/G12_Tf_damage_plots.png", plot = g12_tannerella, device = "png",
+#        scale = 1, width = 8, height = 5, units = c("in"), dpi = 300)
+
+```
+
+```{r}
+
+# number of reads that mapped for each
+lgdist_list <- list.files(path = "./04-analysis/DamageProfiler/out", pattern = "lgdistribution", recursive = T, full.names = T)
+
+anc_Tf_lgdist <- map_dfr(lgdist_list, function(fn) {
+  fread(fn, sep = "\t", skip = 4, fill = T) %>%
+  mutate(Sample = (fn))
+}) %>%
+  mutate(Sample = str_remove_all(Sample, "./04-analysis/DamageProfiler/out/"),
+         Sample = str_remove_all(Sample, ".mapped_q25l30_rmdup/lgdistribution.txt"),
+         Sample = str_replace_all(Sample, "/5pCtoT_freq.txt",".by_lib.Tf")) %>%
+  mutate(Reference = ifelse(str_detect(Sample, ".Tf$"),"forsythia","serpentiformis"))
+
+anc_Tf_lgdist %>%
+  group_by(Sample, Reference) %>%
+  summarize(total_mapped_reads = sum(Occurrences)) %>%
+  ungroup() %>%
+  arrange(Reference, Sample)
+
+# anc_Tf_lgdist %>%
+#   group_by(Sample, Reference) %>%
+#   summarize(total_mapped_reads = sum(Occurrences)) %>%
+#   ungroup() %>%
+#   arrange(Reference, Sample) %>%
+#   filter(!str_detect(Sample, "lgdistribution")) %>%
+#   fwrite(., "./05-results/Tf_DamageProfiler_mapped_read_count.tsv", quote = F, sep = "\t")
+
+
+
+```
+
+
+
+
+
+
