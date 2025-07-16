@@ -1,0 +1,344 @@
+
+# make an eager2 input table for data processing
+# using the samples here: /mnt/archgen/projects1/microbiome_calculus/RIII/01-data/fastqs_raw
+
+B61_S1_run0
+B61_S2_run0
+B61_S3_run0
+B61_S4_run0
+G12_25_2E5_run1
+G12_25_2E6_run1
+G12_25_2E7_run1
+G12_25_2E8_run1
+G12_2E5_run2
+G12_2E6_run2
+G12_2E7_run2
+G12_2E8_run2
+G12_S5_run0
+G12_S6_run0
+G12_S7_run0
+G12_S8_run0
+R31
+R32A
+R32B
+R33
+R3AncBL1
+R3AncBL2
+R3Bag
+R3Box
+R3FR
+R3GL
+R3HS
+R3MODBL
+SMH005.A0101
+SMH005.A0102
+SMH007.A0101
+SMH007.A0102
+SMH008.A0101
+SMH008.A0102
+
+#  run eager with MALT  (no MALT run, it wants to use libraries instead of samples)
+nextflow run nf-core/eager -r 2.4.4 \
+-profile eva,archgen,big_data,malt_big \
+-c /mnt/archgen/users/velsko/nextflow/eva_big_malt.config \
+--input "/mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/riii_simple_eager.tsv" \
+--fasta '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa' \
+--fasta_index '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa.fai' \
+--bwa_index '/mnt/archgen/Reference_Genomes/Human/hs37d5' \
+--seq_dict '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.dict' \
+--skip_deduplication \
+--skip_damage_calculation \
+--skip_preseq \
+--skip_qualimap \
+--complexity_filter_poly_g \
+--bwaalnl 32 \
+--bwaalnn 0.01  \
+--run_bam_filtering \
+--bam_unmapped_type fastq \
+--run_metagenomic_screening \
+--metagenomic_tool malt \
+--database /mnt/archgen/microbiome_sciences/reference_databases/built/refseq/bacteria_archea_homo_20181122/malt/refseq-bac-arch-homo-2018_11/ \
+--malt_sam_output \
+--outdir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/eager2_out \
+-work-dir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/eager2_work \
+-name riii_simple \
+--email irina_marie_velsko@eva.mpg.de \
+-with-tower
+
+# resumed?? as XXX
+
+#  run eager with MALT (MALT run here, but by library not sample)
+nextflow run nf-core/eager -r 2.4.4 \
+-profile eva,archgen,big_data,malt_big \
+-c /mnt/archgen/users/velsko/nextflow/eva_big_malt.config \
+--input "/mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/riii_simple_eager_by_library.tsv" \
+--fasta '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa' \
+--fasta_index '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa.fai' \
+--bwa_index '/mnt/archgen/Reference_Genomes/Human/hs37d5' \
+--seq_dict '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.dict' \
+--skip_deduplication \
+--skip_damage_calculation \
+--skip_preseq \
+--skip_qualimap \
+--complexity_filter_poly_g \
+--bwaalnl 32 \
+--bwaalnn 0.01  \
+--run_bam_filtering \
+--bam_unmapped_type fastq \
+--run_metagenomic_screening \
+--metagenomic_tool malt \
+--database /mnt/archgen/microbiome_sciences/reference_databases/built/refseq/bacteria_archea_homo_20181122/malt/refseq-bac-arch-homo-2018_11/ \
+--malt_sam_output \
+--outdir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/by_library/eager2_out \
+-work-dir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/by_library/eager2_work \
+-name riii_libs \
+--email irina_marie_velsko@eva.mpg.de \
+-with-tower
+
+# clean b/c dropped connection w/MALT running
+nextflow clean -f -k
+
+
+
+#  run eager with MALT (MALT run by sample finally?)
+nextflow run nf-core/eager -r 2.4.4 \
+-profile eva,archgen,big_data,malt_big \
+-c /mnt/archgen/users/velsko/nextflow/eva_big_malt.config \
+--input "/mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/riii_simple_eager_all_together.tsv" \
+--fasta '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa' \
+--fasta_index '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa.fai' \
+--bwa_index '/mnt/archgen/Reference_Genomes/Human/hs37d5' \
+--seq_dict '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.dict' \
+--skip_deduplication \
+--skip_damage_calculation \
+--skip_preseq \
+--skip_qualimap \
+--complexity_filter_poly_g \
+--bwaalnl 32 \
+--bwaalnn 0.01  \
+--run_bam_filtering \
+--bam_unmapped_type fastq \
+--run_metagenomic_screening \
+--metagenomic_tool malt \
+--database /mnt/archgen/microbiome_sciences/reference_databases/built/refseq/bacteria_archea_homo_20181122/malt/refseq-bac-arch-homo-2018_11/ \
+--malt_sam_output \
+--outdir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/all_together/eager2_out \
+-work-dir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/all_together/eager2_work \
+-name riii_s_at \
+--email irina_marie_velsko@eva.mpg.de \
+-with-tower
+
+
+
+# Run eager without collapsing the reads, to upload to ENA
+nextflow run nf-core/eager -r 2.4.5 \
+-profile eva,archgen \
+--input "/mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/riii_simple_eager_by_library_for_ena.tsv" \
+--fasta '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa' \
+--fasta_index '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.fa.fai' \
+--bwa_index '/mnt/archgen/Reference_Genomes/Human/hs37d5' \
+--seq_dict '/mnt/archgen/Reference_Genomes/Human/hs37d5/hs37d5.dict' \
+--skip_collapse \
+--skip_deduplication \
+--skip_damage_calculation \
+--skip_preseq \
+--skip_qualimap \
+--complexity_filter_poly_g \
+--bwaalnl 32 \
+--bwaalnn 0.01  \
+--run_bam_filtering \
+--bam_unmapped_type fastq \
+--outdir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/ena_upload/eager2_out \
+-work-dir /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/ena_upload/eager2_work \
+-name riii_ena \
+--email irina_marie_velsko@eva.mpg.de \
+-with-tower
+
+# convert Alex's non-collapsed SMH reads into fastq for upload b/c the original raw files are in a folder that's now gone
+/mnt/archgen/microbiome_paleobiotech/calcBGCecoevo/04-analysis/eager/G12SMH/mapping/bwa
+
+samtools collate -uO <BAM file> | samtools fastq -1 <FastQ FWD output> -2 <FASTQ REV output> -
+
+for f in /mnt/archgen/microbiome_paleobiotech/calcBGCecoevo/04-analysis/eager/G12SMH/mapping/bwa/SMH*.bam; do
+samtools collate -uO $f | samtools fastq -1 $(basename $f .bam).R1.fastq -2 $(basename $f .bam).R2.fastq -
+done
+
+
+##############################################################
+GC/Read Length
+##############################################################
+
+#unzip the fastq files here: /mnt/archgen/microbiome_calculus/RIII_simple/03-preprocessing/by_sample/eager2_out/samtools/filter
+# then make a folder 04-analysis/gc_rl
+
+# Run emboss explorer to get the average GC content and read length for each RIII sample
+snakemake -s ../../02-scripts/gc_rl_riii_samples.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 6 --latency-wait 40 -n
+
+
+
+
+##############################################################
+SourceTracker
+##############################################################
+
+# after making the table with the Rmd file, need to adjust the header
+# add `# Constructed from biom file` as the first line
+
+snakemake -s ../../../02-scripts/sourcetracker_riii.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 1 -n
+snakemake -s ../../../02-scripts/sourcetracker_riii_by_library.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 1 -n
+
+
+
+##############################################################
+Kraken2 with GTDB r202 database
+##############################################################
+# Run Kraken2 with the GTDB database for the environment blanks that were swabbed along with the RIII samples
+# The RIII calculus samples were already profiled in the abot439 folder, but not the blanks
+# So run the blanks here
+
+snakemake -s ../../02-scripts/riii_environment_swabs_kraken2.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 8 -n
+
+# combine tables for environmental samples
+/mnt/archgen/users/velsko/bin/krakenTools/combine_mpa.py -i out/R3-AncBL1.kraken2.gtdb.report_mpa.tsv out/R3-AncBL2.kraken2.gtdb.report_mpa.tsv out/R3Bag.kraken2.gtdb.report_mpa.tsv out/R3Box.kraken2.gtdb.report_mpa.tsv out/R3FR.kraken2.gtdb.report_mpa.tsv out/R3GL.kraken2.gtdb.report_mpa.tsv out/R3HS.kraken2.gtdb.report_mpa.tsv out/R3MODBL.kraken2.gtdb.report_mpa.tsv -o ../../05-results/riii_environmental_swabs.kraken2.gtdb.report_mpa.tsv
+
+# combine tables for controls
+/mnt/archgen/users/velsko/bin/krakenTools/combine_mpa.py -i out/EXB033.A1201.kraken2.gtdb.report_mpa.tsv out/LIB025.A1601.kraken2.gtdb.report_mpa.tsv -o ../../05-results/riii_blanks.kraken2.gtdb.report_mpa.tsv
+
+ls *mpa.tsv  > mpa_list.tsv
+
+# make a file with RIII environmental control column headers for R
+ls *mpa.tsv  > mpa_list.tsv
+cat mpa_list.tsv | sed 's/.kraken2.gtdb.report_mpa.tsv//g' > ../../../05-results/kraken2_riii_envmt_names.tsv
+
+# make a file with RIII blank control column headers for R as 05-results/kraken2_riii_blank_names.tsv
+EXB033.A1201
+LIB025.A1601
+
+
+
+##############################################################
+RIII MAGs
+##############################################################
+
+# List the RIII MAGs
+# in 00-documentation
+head -1 /mnt/archgen/microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv > riii_mags.tsv
+grep ERSX0002 /mnt/archgen/microbiome_paleobiotech/calcBGCecoevo/05-results/ASMB_MAGS_metaWRAP_postfiltering.tsv >> riii_mags.tsv
+
+# symlink the ancient MAGs
+# make a file to symlink the mags in riii_tannerella.Rmd. Saved as:
+01-data/T_forsythia/ancient_mags/symlink_anc_tf_mags.sh
+
+
+
+##############################################################
+Tannerella forsythia genome phylogeny
+##############################################################
+
+# download the NCBI Tannerella forsythia genomes for clustering
+# get the accessions from NCBI taxID 28112
+
+snakemake -s ./02-scripts/./T_forsythia_genomes.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix conda --cluster "qsub -pe smp 8 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 1 --latency-wait 40 -n
+
+# saves this file with  the info: 01-data/Tforsythia/ncbi/ncbi_assembly_T_forsythia_taxids.txt
+
+# now get the accessions into a single file
+awk '{print $1}' ncbi_assembly_t_forsythia_taxids.txt > t_forsythia_accessions.tsv
+
+# download the genomes with ncbi datasets
+conda activate ncbi_datasets
+datasets download genome accession --inputfile t_forsythia_accessions.tsv
+
+# now make a fake dRep Wdb file for Alex's phylophlan script to run
+mkdir 04-analysis/phylophlan/fake_dRep
+touch 04-analysis/phylophlan/fake_dRep/Wdb.csv
+head -1 ../hornefia_evo/04-analysis/dRep/dRep_50_hornefia_out/data_tables/Wdb.csv >> 04-analysis/phylophlan/fake_dRep/Wdb.csv
+# then from folder 01-data/tf_mags_refs
+ls -1 *.f* | awk '{print $1,",1,1"}' >> ../../04-analysis/phylophlan/fake_dRep/Wdb.csv
+
+# Try running the script w/o installing a new conda environment by using the conda environment in the abot439_evo folder
+snakemake -s ./02-scripts/riii_t_forsythia_phylophlan.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix /mnt/archgen/microbiome_calculus/abot439_evo/conda/ --cluster "qsub -pe smp 8 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 2 --latency-wait 40 --keep-going -n
+
+
+# Additionally, run dRep on the T. forsythia NCBI genomes to get checkM 
+# completeness/contamination estimates for plotting along with the phylogeny
+
+snakemake -s ../../02-scripts/dRep_T_forsythia_reps.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 12 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 1 --latency-wait 30 -n
+
+# run raxml independently on the phylophlan marker gene protein alignment to get bootstrap values
+snakemake -s ../../02-scripts/raxml_tannerella_tree.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix conda --cluster "qsub -pe smp 8 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 1 --latency-wait 40 -n
+
+
+
+##############################################################
+Tannerella forsythia mapping and damage plots
+##############################################################
+
+# Map to Tannerella forsythia for damage profiler plots
+snakemake -s ../../02-scripts/map_riii_tannerella.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 10 --latency-wait 40 --keep-going -n
+
+# map again by library for the samples that have multiple libraries (see if the odd patterns are due to combining libraries)
+snakemake -s ../../02-scripts/map_riii_tannerella_by_library.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 10 --latency-wait 40 --keep-going -n
+
+# Map G12 to T. serpentiformis independently
+snakemake -s ../../02-scripts/map_G12_Tserpentiformis.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 10 --latency-wait 40 --keep-going -n
+
+# map again by library (see if the odd patterns are due to combining libraries)
+snakemake -s ../../02-scripts/map_G12_Tserpentiformis_by_library.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 10 --latency-wait 40 --keep-going -n
+
+# Run damageProfiler to get damage pattern plots
+conda activate damageprofiler
+snakemake -s ../../02-scripts/damageprofiler_T_forsythia.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --cluster "qsub -pe smp 32 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 2 --latency-wait 40 --keep-going -n
+
+
+##############################################################
+T. forsythia virulence factors
+##############################################################
+
+# annotate the NCBI genomes with Bakta to get annotations consistent with those for the ancient genomes
+
+# create the conda environment
+snakemake -s ../../02-scripts/bakta_ncbi_Tannerella.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix conda --cluster "qsub -pe smp 8 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}"  -j  1 --conda-create-envs-only
+
+# run the script
+snakemake -s ../../02-scripts/bakta_ncbi_Tannerella.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix conda --cluster "qsub -pe smp 8 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 4 --latency-wait 40 --keep-going -n
+
+
+# get virulence factors in each genome:
+# in 04-analysis/bakta
+zgrep tfsA *.tsv.gz > tfsA_list.tsv
+zgrep tfsB *.tsv.gz > tfsb_list.tsv
+zgrep bspA *.tsv.gz > bspA_list.tsv
+zgrep "BIG2 domain-containing protein" *.tsv.gz >> bspA_list.tsv
+zgrep "N-acetyl-beta-hexosaminidase" *.tsv.gz > hexA_list.tsv
+zgrep nanH *.tsv.gz > nanH_list.tsv
+zgrep mviM *.tsv.gz > siaH_list.tsv
+zgrep "Glycoside hydrolase family 97 protein" *.tsv.gz > susB_list.tsv
+zgrep wecC *.tsv.gz > wecC_list.tsv
+
+# in 01-data/tf_mags_refs_gff
+zgrep tfsA *.gff3.gz > tfsA_list.tsv
+zgrep tfsB *.gff3.gz > tfsb_list.tsv
+zgrep bspA *.gff3.gz > bspA_list.tsv
+zgrep "BIG2 domain-containing protein" *.gff3.gz >> bspA_list.tsv
+zgrep "N-acetyl-beta-hexosaminidase" *.gff3.gz > hexA_list.tsv
+zgrep nanH *.gff3.gz > nanH_list.tsv
+zgrep mviM *.gff3.gz > siaH_list.tsv
+zgrep "Glycoside hydrolase family 97 protein" *.gff3.gz > susB_list.tsv
+zgrep wecC *.gff3.gz > wecC_list.tsv
+
+# now read these into R (riii_virulence_factors.Rmd) to create a table with the number of hits for each gene per genome
+# save the file as T_forsythia_virulence_factors.tsv
+
+
+##############################################################
+ENA upload files from eager output
+##############################################################
+
+# run here: 03-preprocessing/ena_upload/eager2_out/for_ena_upload
+snakemake -s ../../../../02-scripts/ena_upload_bam_to_fastq.Snakefile --cluster-config /mnt/archgen/microbiome_calculus/abpCapture/02-scripts.backup/snakemake_default.config --profile /home/irina_marie_velsko/.config/snakemake/cluster --use-conda --conda-prefix conda --cluster "qsub -pe smp 4 -l virtual_free={cluster.mem},h_vmem={cluster.mem} -o {cluster.out} -e {cluster.err}" -j 4 --latency-wait 40 --keep-going -n
+
+
+
+
+
